@@ -61,8 +61,8 @@ build/
 *.seed
 *.pid.lock
 
-# 但可以忽略本地已构建的 dist 目录
-web/admin-spa/dist/
+# 注意：web/admin-spa/dist/ 需要被包含在镜像中（预构建的前端资源）
+# web/admin-spa/dist/
 
 # CI/CD
 .travis.yml
