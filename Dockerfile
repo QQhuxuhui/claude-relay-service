@@ -12,17 +12,7 @@ RUN apk add --no-cache dumb-init || true
 # 📁 设置工作目录
 WORKDIR /app
 
-# 📦 复制 package 文件
-COPY package*.json ./
-
-# 🔽 安装依赖 (生产环境，使用淘宝镜像源)
-RUN npm config set registry https://registry.npmmirror.com && \
-    npm config set fetch-timeout 600000 && \
-    npm config set fetch-retries 5 && \
-    npm install --omit=dev --legacy-peer-deps && \
-    npm cache clean --force
-
-# 📋 复制应用代码 (包含预构建的前端 dist 目录)
+# 📋 复制应用代码 (包含预构建的前端 dist 目录和 node_modules)
 COPY . .
 
 # 🔧 复制并设置启动脚本权限
