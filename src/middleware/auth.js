@@ -1147,6 +1147,30 @@ const errorHandler = (error, req, res, _next) => {
   const requestId = req.requestId || 'unknown'
   const isDevelopment = process.env.NODE_ENV === 'development'
 
+  // 特殊处理 request aborted 错误 - 这通常不是服务器问题
+  if (error.message === 'request aborted' || error.code === 'ECONNRESET') {
+    logger.warn(`🔌 [${requestId}] Client aborted request:`, {
+      error: error.message,
+      code: error.code,
+      url: req.originalUrl,
+      method: req.method,
+      ip: req.ip || 'unknown',
+      userAgent: req.get('User-Agent') || 'unknown',
+      contentLength: req.get('content-length')
+    })
+
+    // 如果响应头还没发送，返回499状态码（客户端关闭请求）
+    if (!res.headersSent) {
+      return res.status(499).json({
+        error: 'Client Closed Request',
+        message: 'The client closed the connection before the request could be completed',
+        requestId,
+        timestamp: new Date().toISOString()
+      })
+    }
+    return
+  }
+
   // 记录详细错误信息
   logger.error(`💥 [${requestId}] Unhandled error:`, {
     error: error.message,
@@ -1200,6 +1224,12 @@ const errorHandler = (error, req, res, _next) => {
           userMessage = 'Request timeout'
         }
       }
+  }
+
+  // 如果响应头已发送，不能再发送响应
+  if (res.headersSent) {
+    logger.warn(`⚠️ [${requestId}] Cannot send error response - headers already sent`)
+    return
   }
 
   // 设置响应头

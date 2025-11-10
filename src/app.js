@@ -157,6 +157,17 @@ class Application {
         }
       }
 
+      // ⏱️ 请求超时和监控中间件（必须在body parser之前）
+      const {
+        requestTimeoutMiddleware,
+        requestMonitorMiddleware
+      } = require('./middleware/requestTimeout')
+      this.app.use(requestTimeoutMiddleware)
+      this.app.use(requestMonitorMiddleware)
+      logger.info(
+        `⏱️ Request timeout middleware enabled (timeout: ${config.requestTimeout || 600000}ms)`
+      )
+
       // 🔧 基础中间件
       this.app.use(
         express.json({

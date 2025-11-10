@@ -217,6 +217,41 @@ const handleResponses = async (req, res) => {
   let account = null
   let proxy = null
   let accessToken = null
+  let requestAborted = false
+
+  // 检测请求是否已经中断
+  if (req.timedOut) {
+    logger.warn('🔌 Request already timed out before processing', {
+      method: req.method,
+      path: req.path,
+      ip: req.ip
+    })
+    return
+  }
+
+  // 监听请求中断事件
+  const abortHandler = () => {
+    requestAborted = true
+    logger.warn('🔌 Client aborted request during processing', {
+      method: req.method,
+      path: req.path,
+      accountId,
+      accountType,
+      hasUpstream: !!upstream
+    })
+  }
+
+  req.on('aborted', abortHandler)
+  req.on('close', () => {
+    if (!res.writableEnded && !requestAborted) {
+      requestAborted = true
+      logger.warn('🔌 Request closed unexpectedly', {
+        method: req.method,
+        path: req.path,
+        accountId
+      })
+    }
+  })
 
   try {
     // 从中间件获取 API Key 数据
@@ -342,12 +377,30 @@ const handleResponses = async (req, res) => {
 
     // 根据 stream 参数决定请求类型
     if (isStream) {
+      // 在发送请求前检查连接状态
+      if (requestAborted || req.timedOut) {
+        logger.warn('🔌 Request aborted before sending upstream request', {
+          requestAborted,
+          timedOut: req.timedOut
+        })
+        return
+      }
+
       // 流式请求
       upstream = await axios.post('https://chatgpt.com/backend-api/codex/responses', req.body, {
         ...axiosConfig,
         responseType: 'stream'
       })
     } else {
+      // 在发送请求前检查连接状态
+      if (requestAborted || req.timedOut) {
+        logger.warn('🔌 Request aborted before sending upstream request', {
+          requestAborted,
+          timedOut: req.timedOut
+        })
+        return
+      }
+
       // 非流式请求
       upstream = await axios.post(
         'https://chatgpt.com/backend-api/codex/responses',
@@ -780,7 +833,13 @@ const handleResponses = async (req, res) => {
     })
 
     upstream.data.on('error', (err) => {
-      logger.error('Upstream stream error:', err)
+      logger.error('Upstream stream error:', {
+        error: err.message,
+        code: err.code,
+        accountId,
+        accountType,
+        requestAborted
+      })
       if (!res.headersSent) {
         res.status(502).json({ error: { message: 'Upstream stream error' } })
       } else {
@@ -790,16 +849,49 @@ const handleResponses = async (req, res) => {
 
     // 客户端断开时清理上游流
     const cleanup = () => {
+      if (requestAborted) {
+        logger.info('🧹 Cleaning up upstream connection after client abort', { accountId })
+      }
       try {
         upstream.data?.unpipe?.(res)
         upstream.data?.destroy?.()
-      } catch (_) {
-        //
+      } catch (cleanupError) {
+        logger.warn('⚠️ Error during upstream cleanup:', cleanupError.message)
       }
     }
     req.on('close', cleanup)
     req.on('aborted', cleanup)
   } catch (error) {
+    // 清理监听器
+    req.removeListener('aborted', abortHandler)
+
+    // 特殊处理 request aborted 错误
+    if (error.message === 'request aborted' || error.code === 'ECONNRESET') {
+      logger.warn('🔌 Request aborted error caught in handler', {
+        message: error.message,
+        code: error.code,
+        accountId,
+        accountType,
+        method: req.method,
+        path: req.path,
+        ip: req.ip,
+        userAgent: req.get('user-agent'),
+        contentLength: req.get('content-length')
+      })
+
+      // 如果响应头还没发送，返回499客户端关闭请求
+      if (!res.headersSent) {
+        res.status(499).json({
+          error: {
+            type: 'client_closed_request',
+            message: 'Client closed the request',
+            code: 'client_closed_request'
+          }
+        })
+      }
+      return
+    }
+
     logger.error('Proxy to ChatGPT codex/responses failed:', error)
     // 优先使用主动设置的 statusCode，然后是上游响应的状态码，最后默认 500
     const status = error.statusCode || error.response?.status || 500
