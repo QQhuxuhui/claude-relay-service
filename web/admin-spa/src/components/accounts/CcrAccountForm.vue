@@ -179,6 +179,87 @@
             </div>
           </div>
 
+          <!-- 🆕 多中继上游检测规避策略 -->
+          <div class="space-y-4 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:from-blue-900/30 dark:to-indigo-900/30">
+            <div class="flex items-center gap-2">
+              <i class="fas fa-shield-alt text-blue-600 dark:text-blue-400"></i>
+              <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">
+                多中继限流配置 (可选)
+              </h4>
+            </div>
+            <p class="text-xs text-gray-600 dark:text-gray-400">
+              配置会话窗口限流和费用限制，降低被检测为分销账户的风险。留空或设置为 0 表示不限制。
+            </p>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  上游提供商
+                </label>
+                <input
+                  v-model="form.provider"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  placeholder="如: closeai, api2d, api7"
+                  type="text"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  标识上游中转服务提供商
+                </p>
+              </div>
+              <div>
+                <label class="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  会话窗口时长 (小时)
+                </label>
+                <input
+                  v-model.number="form.sessionWindowHours"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  min="0.1"
+                  max="24"
+                  placeholder="默认 1"
+                  step="0.5"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  统计窗口时长 (0.1-24 小时)
+                </p>
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div>
+                <label class="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  窗口内最大请求数
+                </label>
+                <input
+                  v-model.number="form.maxRequestsPerWindow"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  min="0"
+                  placeholder="0 表示不限制"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  会话窗口内允许的最大请求数
+                </p>
+              </div>
+              <div>
+                <label class="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
+                  每日最大费用 ($)
+                </label>
+                <input
+                  v-model.number="form.maxCostPerDay"
+                  class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
+                  min="0"
+                  placeholder="0 表示不限制"
+                  step="0.01"
+                  type="number"
+                />
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+                  每日最大费用限制 (美元)
+                </p>
+              </div>
+            </div>
+          </div>
+
           <!-- 模型映射表（可选） -->
           <div>
             <label class="mb-3 block text-sm font-semibold text-gray-700 dark:text-gray-300"
@@ -287,7 +368,12 @@ const form = ref({
   dailyQuota: 0,
   quotaResetTime: '00:00',
   proxy: null,
-  supportedModels: {}
+  supportedModels: {},
+  // 🆕 多中继上游检测规避策略字段
+  provider: '',
+  sessionWindowHours: 1,
+  maxRequestsPerWindow: 0,
+  maxCostPerDay: 0
 })
 
 const enableRateLimit = ref(true)
@@ -339,7 +425,12 @@ const submit = async () => {
         dailyQuota: Number(form.value.dailyQuota || 0),
         quotaResetTime: form.value.quotaResetTime || '00:00',
         proxy: form.value.proxy || null,
-        supportedModels: buildSupportedModels()
+        supportedModels: buildSupportedModels(),
+        // 🆕 多中继上游检测规避策略字段
+        provider: form.value.provider || '',
+        sessionWindowHours: Number(form.value.sessionWindowHours || 1),
+        maxRequestsPerWindow: Number(form.value.maxRequestsPerWindow || 0),
+        maxCostPerDay: Number(form.value.maxCostPerDay || 0)
       }
       if (form.value.apiKey && form.value.apiKey.trim().length > 0) {
         updates.apiKey = form.value.apiKey
@@ -365,7 +456,12 @@ const submit = async () => {
         proxy: form.value.proxy,
         accountType: 'shared',
         dailyQuota: Number(form.value.dailyQuota || 0),
-        quotaResetTime: form.value.quotaResetTime || '00:00'
+        quotaResetTime: form.value.quotaResetTime || '00:00',
+        // 🆕 多中继上游检测规避策略字段
+        provider: form.value.provider || '',
+        sessionWindowHours: Number(form.value.sessionWindowHours || 1),
+        maxRequestsPerWindow: Number(form.value.maxRequestsPerWindow || 0),
+        maxCostPerDay: Number(form.value.maxCostPerDay || 0)
       }
       const res = await apiClient.post('/admin/ccr-accounts', payload)
       if (res.success) {
@@ -394,6 +490,11 @@ const populateFromAccount = () => {
   form.value.dailyQuota = Number(a.dailyQuota || 0)
   form.value.quotaResetTime = a.quotaResetTime || '00:00'
   form.value.proxy = a.proxy || null
+  // 🆕 多中继上游检测规避策略字段
+  form.value.provider = a.provider || ''
+  form.value.sessionWindowHours = Number(a.sessionWindowHours || 1)
+  form.value.maxRequestsPerWindow = Number(a.maxRequestsPerWindow || 0)
+  form.value.maxCostPerDay = Number(a.maxCostPerDay || 0)
   enableRateLimit.value = form.value.rateLimitDuration > 0
 
   // supportedModels 对象转为数组

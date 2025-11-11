@@ -1,3 +1,22 @@
+<!-- OPENSPEC:START -->
+# OpenSpec Instructions
+
+These instructions are for AI assistants working in this project.
+
+Always open `@/openspec/AGENTS.md` when the request:
+- Mentions planning or proposals (words like proposal, spec, change, plan)
+- Introduces new capabilities, breaking changes, architecture shifts, or big performance/security work
+- Sounds ambiguous and you need the authoritative spec before coding
+
+Use `@/openspec/AGENTS.md` to learn:
+- How to create and apply change proposals
+- Spec format and conventions
+- Project structure and guidelines
+
+Keep this managed block so 'openspec update' can refresh the instructions.
+
+<!-- OPENSPEC:END -->
+
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
@@ -139,6 +158,50 @@ Claude Relay Service 是一个多平台 AI API 中转服务，支持 **Claude (�
 - ✅ **HTTP调试**: DEBUG_HTTP_TRAFFIC模式详细记录HTTP请求/响应
 - ✅ **数据迁移**: 完整的数据导入导出工具（含加密/脱敏）
 - ✅ **自动清理**: 并发计数、速率限制、临时错误状态自动清理
+- ✅ **多中继上游检测规避**: 会话窗口限流和每日费用限制，降低被检测为分销账户的风险
+
+### 🆕 多中继上游检测规避策略
+
+针对使用国内中转服务（如CloseAI、API2D等）作为上游时的检测风险，系统提供细粒度的限流配置：
+
+#### 核心功能
+
+- **会话窗口限流**: 配置时间窗口（如1小时）内的最大请求数，避免短时突发流量
+- **每日费用限制**: 设置账户每日最大费用，防止成本失控和异常消费检测
+- **上游提供商标识**: 标记账户的上游服务商，便于分组管理和监控
+- **智能调度增强**: 自动排除达到限制的账户，实现故障转移
+
+#### 配置方式
+
+所有限流参数都通过 **Web UI** 或 **Admin API** 在账户级别配置，支持运行时动态修改：
+
+```javascript
+// CCR账户配置示例
+{
+  "provider": "closeai",              // 上游提供商标识
+  "sessionWindowHours": 1,            // 会话窗口时长（小时）
+  "maxRequestsPerWindow": 100,        // 窗口内最大请求数（0=不限）
+  "maxCostPerDay": 50.0               // 每日最大费用（美元，0=不限）
+}
+```
+
+#### 环境变量默认值
+
+```bash
+# 新创建账户的默认值（实际限制由账户级配置决定）
+RELAY_ACCOUNT_SESSION_WINDOW_HOURS=1
+RELAY_ACCOUNT_MAX_REQUESTS_PER_WINDOW=0
+RELAY_ACCOUNT_MAX_COST_PER_DAY=0
+RELAY_ACCOUNT_PRIORITY_STRATEGY=priority_lru
+```
+
+#### 使用建议
+
+- **保守配置**: `sessionWindowHours: 1`, `maxRequestsPerWindow: 100`, `maxCostPerDay: 50`
+- **积极配置**: `sessionWindowHours: 2`, `maxRequestsPerWindow: 200`, `maxCostPerDay: 100`
+- **混合策略**: 高优先级账户使用保守配置，备用账户使用积极配置
+
+详细配置指南请参考：`docs/multi-relay-configuration-guide.md`
 
 ## 常用命令
 

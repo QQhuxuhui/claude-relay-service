@@ -49,7 +49,12 @@ class CcrAccountService {
       accountType = 'shared', // 'dedicated' or 'shared'
       schedulable = true, // 是否可被调度
       dailyQuota = 0, // 每日额度限制（美元），0表示不限制
-      quotaResetTime = '00:00' // 额度重置时间（HH:mm格式）
+      quotaResetTime = '00:00', // 额度重置时间（HH:mm格式）
+      // 🆕 新增多中继上游检测规避策略字段
+      provider = '', // 上游提供商标识（如 closeai, api2d, api7 等）
+      sessionWindowHours = config.relayAccountLimits?.sessionWindowHours || 1, // 会话窗口时长（小时）
+      maxRequestsPerWindow = config.relayAccountLimits?.maxRequestsPerWindow || 0, // 窗口内最大请求数（0=不限）
+      maxCostPerDay = config.relayAccountLimits?.maxCostPerDay || 0 // 每日最大费用（美元，0=不限）
     } = options
 
     // 验证必填字段
@@ -96,7 +101,12 @@ class CcrAccountService {
       // 使用与统计一致的时区日期，避免边界问题
       lastResetDate: redis.getDateStringInTimezone(), // 最后重置日期（按配置时区）
       quotaResetTime, // 额度重置时间
-      quotaStoppedAt: '' // 因额度停用的时间
+      quotaStoppedAt: '', // 因额度停用的时间
+      // 🆕 多中继上游检测规避策略字段
+      provider, // 上游提供商标识
+      sessionWindowHours: sessionWindowHours.toString(), // 会话窗口时长（小时）
+      maxRequestsPerWindow: maxRequestsPerWindow.toString(), // 窗口内最大请求数
+      maxCostPerDay: maxCostPerDay.toString() // 每日最大费用
     }
 
     const client = redis.getClientSafe()
@@ -132,7 +142,12 @@ class CcrAccountService {
       dailyUsage: 0,
       lastResetDate: accountData.lastResetDate,
       quotaResetTime,
-      quotaStoppedAt: null
+      quotaStoppedAt: null,
+      // 🆕 多中继上游检测规避策略字段
+      provider,
+      sessionWindowHours,
+      maxRequestsPerWindow,
+      maxCostPerDay
     }
   }
 
@@ -179,7 +194,12 @@ class CcrAccountService {
             dailyUsage: parseFloat(accountData.dailyUsage || '0'),
             lastResetDate: accountData.lastResetDate || '',
             quotaResetTime: accountData.quotaResetTime || '00:00',
-            quotaStoppedAt: accountData.quotaStoppedAt || null
+            quotaStoppedAt: accountData.quotaStoppedAt || null,
+            // 🆕 多中继上游检测规避策略字段
+            provider: accountData.provider || '',
+            sessionWindowHours: parseInt(accountData.sessionWindowHours) || 1,
+            maxRequestsPerWindow: parseInt(accountData.maxRequestsPerWindow) || 0,
+            maxCostPerDay: parseFloat(accountData.maxCostPerDay) || 0
           })
         }
       }
@@ -301,6 +321,20 @@ class CcrAccountService {
       // CCR 使用 API Key，没有 token 刷新逻辑，不会覆盖此字段
       if (updates.subscriptionExpiresAt !== undefined) {
         updatedData.subscriptionExpiresAt = updates.subscriptionExpiresAt
+      }
+
+      // 🆕 多中继上游检测规避策略字段更新
+      if (updates.provider !== undefined) {
+        updatedData.provider = updates.provider
+      }
+      if (updates.sessionWindowHours !== undefined) {
+        updatedData.sessionWindowHours = updates.sessionWindowHours.toString()
+      }
+      if (updates.maxRequestsPerWindow !== undefined) {
+        updatedData.maxRequestsPerWindow = updates.maxRequestsPerWindow.toString()
+      }
+      if (updates.maxCostPerDay !== undefined) {
+        updatedData.maxCostPerDay = updates.maxCostPerDay.toString()
       }
 
       await client.hset(`${this.ACCOUNT_KEY_PREFIX}${accountId}`, updatedData)
@@ -951,6 +985,161 @@ class CcrAccountService {
     }
     const expiryDate = new Date(account.subscriptionExpiresAt)
     return expiryDate <= new Date()
+  }
+
+  // 🆕 多中继上游检测规避策略 - 会话窗口限流检查
+  /**
+   * 🔍 检查账户会话窗口是否超限
+   * @param {string} accountId - 账户ID
+   * @returns {Promise<boolean>} - true: 超限, false: 未超限
+   */
+  async isAccountSessionWindowExceeded(accountId) {
+    try {
+      const account = await this.getAccount(accountId)
+      if (!account) {
+        return false
+      }
+
+      const maxRequestsPerWindow = parseInt(account.maxRequestsPerWindow) || 0
+      // 如果未设置限制（0表示不限），则不检查
+      if (maxRequestsPerWindow <= 0) {
+        return false
+      }
+
+      const sessionWindowHours = parseInt(account.sessionWindowHours) || 1
+      const windowStart = new Date(Date.now() - sessionWindowHours * 3600 * 1000)
+      const windowEnd = new Date()
+
+      // 使用 Redis 现有方法查询会话窗口使用量
+      const usage = await redis.getAccountSessionWindowUsage(accountId, windowStart, windowEnd)
+
+      const isExceeded = usage.totalRequests >= maxRequestsPerWindow
+
+      if (isExceeded) {
+        logger.warn(
+          `🚫 CCR account ${account.name} (${accountId}) session window exceeded: ${usage.totalRequests}/${maxRequestsPerWindow} requests`
+        )
+      }
+
+      return isExceeded
+    } catch (error) {
+      logger.error(`❌ Failed to check session window for CCR account ${accountId}:`, error)
+      return false
+    }
+  }
+
+  /**
+   * 🔍 检查账户每日费用是否超限
+   * @param {string} accountId - 账户ID
+   * @returns {Promise<boolean>} - true: 超限, false: 未超限
+   */
+  async isAccountDailyCostExceeded(accountId) {
+    try {
+      const account = await this.getAccount(accountId)
+      if (!account) {
+        return false
+      }
+
+      const maxCostPerDay = parseFloat(account.maxCostPerDay) || 0
+      // 如果未设置限制（0表示不限），则不检查
+      if (maxCostPerDay <= 0) {
+        return false
+      }
+
+      // 使用 Redis 现有方法查询每日费用
+      const dailyCost = await redis.getAccountDailyCost(accountId)
+
+      const isExceeded = dailyCost >= maxCostPerDay
+
+      if (isExceeded) {
+        logger.warn(
+          `💰 CCR account ${account.name} (${accountId}) daily cost exceeded: $${dailyCost.toFixed(2)} / $${maxCostPerDay.toFixed(2)}`
+        )
+
+        // 发送 Webhook 通知 (80% 阈值告警)
+        if (dailyCost >= maxCostPerDay * 0.8 && dailyCost < maxCostPerDay) {
+          try {
+            const webhookNotifier = require('../utils/webhookNotifier')
+            await webhookNotifier.sendAccountAnomalyNotification({
+              accountId,
+              accountName: account.name || accountId,
+              platform: 'ccr',
+              status: 'cost_warning',
+              errorCode: 'DAILY_COST_WARNING',
+              reason: `Daily cost approaching limit: $${dailyCost.toFixed(2)} / $${maxCostPerDay.toFixed(2)} (${((dailyCost / maxCostPerDay) * 100).toFixed(1)}%)`,
+              timestamp: new Date().toISOString()
+            })
+          } catch (webhookError) {
+            logger.warn('Failed to send webhook notification for CCR cost warning:', webhookError)
+          }
+        }
+      }
+
+      return isExceeded
+    } catch (error) {
+      logger.error(`❌ Failed to check daily cost for CCR account ${accountId}:`, error)
+      return false
+    }
+  }
+
+  /**
+   * 🔍 检查账户是否可用（综合检查）
+   * @param {string} accountId - 账户ID
+   * @returns {Promise<{available: boolean, reason: string}>}
+   */
+  async isAccountAvailable(accountId) {
+    try {
+      const account = await this.getAccount(accountId)
+      if (!account) {
+        return { available: false, reason: 'Account not found' }
+      }
+
+      // 1. 检查基本状态
+      if (!account.isActive) {
+        return { available: false, reason: 'Account is inactive' }
+      }
+
+      if (!account.schedulable) {
+        return { available: false, reason: 'Account is not schedulable' }
+      }
+
+      // 2. 检查状态
+      if (account.status !== 'active') {
+        return {
+          available: false,
+          reason: `Account status is ${account.status}`
+        }
+      }
+
+      // 3. 检查限流状态
+      const isRateLimited = await this.isAccountRateLimited(accountId)
+      if (isRateLimited) {
+        return { available: false, reason: 'Account is rate limited' }
+      }
+
+      // 4. 检查额度
+      const isQuotaExceeded = await this.isAccountQuotaExceeded(accountId)
+      if (isQuotaExceeded) {
+        return { available: false, reason: 'Daily quota exceeded' }
+      }
+
+      // 5. 🆕 检查会话窗口限流
+      const isSessionWindowExceeded = await this.isAccountSessionWindowExceeded(accountId)
+      if (isSessionWindowExceeded) {
+        return { available: false, reason: 'Session window requests exceeded' }
+      }
+
+      // 6. 🆕 检查每日费用限制
+      const isDailyCostExceeded = await this.isAccountDailyCostExceeded(accountId)
+      if (isDailyCostExceeded) {
+        return { available: false, reason: 'Daily cost limit exceeded' }
+      }
+
+      return { available: true, reason: '' }
+    } catch (error) {
+      logger.error(`❌ Failed to check account availability for ${accountId}:`, error)
+      return { available: false, reason: 'Error checking availability' }
+    }
   }
 }
 

@@ -990,6 +990,18 @@ class UnifiedClaudeScheduler {
         if (await ccrAccountService.isAccountOverloaded(accountId)) {
           return false
         }
+        // 🆕 检查会话窗口限流
+        if (await ccrAccountService.isAccountSessionWindowExceeded(accountId)) {
+          logger.info(
+            `🚫 CCR account ${accountId} session window requests exceeded (session check)`
+          )
+          return false
+        }
+        // 🆕 检查每日费用限制
+        if (await ccrAccountService.isAccountDailyCostExceeded(accountId)) {
+          logger.info(`🚫 CCR account ${accountId} daily cost limit exceeded (session check)`)
+          return false
+        }
         return true
       }
       return false
@@ -1533,8 +1545,19 @@ class UnifiedClaudeScheduler {
           const isRateLimited = await ccrAccountService.isAccountRateLimited(account.id)
           const isQuotaExceeded = await ccrAccountService.isAccountQuotaExceeded(account.id)
           const isOverloaded = await ccrAccountService.isAccountOverloaded(account.id)
+          // 🆕 检查会话窗口限流和每日费用限制
+          const isSessionWindowExceeded = await ccrAccountService.isAccountSessionWindowExceeded(
+            account.id
+          )
+          const isDailyCostExceeded = await ccrAccountService.isAccountDailyCostExceeded(account.id)
 
-          if (!isRateLimited && !isQuotaExceeded && !isOverloaded) {
+          if (
+            !isRateLimited &&
+            !isQuotaExceeded &&
+            !isOverloaded &&
+            !isSessionWindowExceeded &&
+            !isDailyCostExceeded
+          ) {
             availableAccounts.push({
               ...account,
               accountId: account.id,
@@ -1545,7 +1568,7 @@ class UnifiedClaudeScheduler {
             logger.debug(`✅ Added CCR account to available pool: ${account.name}`)
           } else {
             logger.debug(
-              `❌ CCR account ${account.name} not available - rateLimited: ${isRateLimited}, quotaExceeded: ${isQuotaExceeded}, overloaded: ${isOverloaded}`
+              `❌ CCR account ${account.name} not available - rateLimited: ${isRateLimited}, quotaExceeded: ${isQuotaExceeded}, overloaded: ${isOverloaded}, sessionWindowExceeded: ${isSessionWindowExceeded}, dailyCostExceeded: ${isDailyCostExceeded}`
             )
           }
         } else {
