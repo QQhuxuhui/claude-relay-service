@@ -8435,7 +8435,17 @@ router.get('/openai-responses-accounts', authenticateAdmin, async (req, res) => 
 // 创建 OpenAI-Responses 账户
 router.post('/openai-responses-accounts', authenticateAdmin, async (req, res) => {
   try {
+    const { accountType, groupId } = req.body
     const account = await openaiResponsesAccountService.createAccount(req.body)
+
+    // 如果是分组类型，添加到分组
+    if (accountType === 'group' && groupId) {
+      await accountGroupService.addAccountToGroup(account.id, groupId, 'openai')
+      logger.info(
+        `✅ Added OpenAI-Responses account ${account.id} to group ${groupId} (platform: openai)`
+      )
+    }
+
     const formattedAccount = formatAccountExpiry(account)
     res.json({ success: true, data: formattedAccount })
   } catch (error) {
@@ -8455,6 +8465,48 @@ router.put('/openai-responses-accounts/:id', authenticateAdmin, async (req, res)
 
     // ✅ 【新增】映射字段名：前端的 expiresAt -> 后端的 subscriptionExpiresAt
     const mappedUpdates = mapExpiryField(updates, 'OpenAI-Responses', id)
+
+    // 验证accountType的有效性
+    if (
+      mappedUpdates.accountType &&
+      !['shared', 'dedicated', 'group'].includes(mappedUpdates.accountType)
+    ) {
+      return res
+        .status(400)
+        .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
+    }
+
+    // 如果更新为分组类型，验证groupId
+    if (mappedUpdates.accountType === 'group' && !mappedUpdates.groupId) {
+      return res.status(400).json({ error: 'Group ID is required for group type accounts' })
+    }
+
+    // 获取账户当前信息以处理分组变更
+    const currentAccount = await openaiResponsesAccountService.getAccount(id)
+    if (!currentAccount) {
+      return res.status(404).json({ error: 'Account not found' })
+    }
+
+    // 处理分组的变更
+    if (mappedUpdates.accountType !== undefined) {
+      // 如果之前是分组类型，需要从原分组中移除
+      if (currentAccount.accountType === 'group') {
+        const oldGroup = await accountGroupService.getAccountGroup(id)
+        if (oldGroup) {
+          await accountGroupService.removeAccountFromGroup(id, oldGroup.id)
+          logger.info(
+            `Removed OpenAI-Responses account ${id} from old group ${oldGroup.id} (${oldGroup.name})`
+          )
+        }
+      }
+      // 如果新类型是分组，添加到新分组
+      if (mappedUpdates.accountType === 'group' && mappedUpdates.groupId) {
+        await accountGroupService.addAccountToGroup(id, mappedUpdates.groupId, 'openai')
+        logger.info(
+          `✅ Added OpenAI-Responses account ${id} to group ${mappedUpdates.groupId} (platform: openai)`
+        )
+      }
+    }
 
     // 验证priority的有效性（1-100）
     if (mappedUpdates.priority !== undefined) {
