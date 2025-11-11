@@ -180,7 +180,9 @@
           </div>
 
           <!-- 🆕 多中继上游检测规避策略 -->
-          <div class="space-y-4 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:from-blue-900/30 dark:to-indigo-900/30">
+          <div
+            class="space-y-4 rounded-lg bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:from-blue-900/30 dark:to-indigo-900/30"
+          >
             <div class="flex items-center gap-2">
               <i class="fas fa-shield-alt text-blue-600 dark:text-blue-400"></i>
               <h4 class="text-sm font-semibold text-gray-700 dark:text-gray-300">
@@ -202,9 +204,7 @@
                   placeholder="如: closeai, api2d, api7"
                   type="text"
                 />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  标识上游中转服务提供商
-                </p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">标识上游中转服务提供商</p>
               </div>
               <div>
                 <label class="mb-2 block text-xs font-medium text-gray-700 dark:text-gray-300">
@@ -213,8 +213,8 @@
                 <input
                   v-model.number="form.sessionWindowHours"
                   class="form-input w-full border-gray-300 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-200"
-                  min="0.1"
                   max="24"
+                  min="0.1"
                   placeholder="默认 1"
                   step="0.5"
                   type="number"
@@ -253,9 +253,7 @@
                   step="0.01"
                   type="number"
                 />
-                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  每日最大费用限制 (美元)
-                </p>
+                <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">每日最大费用限制 (美元)</p>
               </div>
             </div>
           </div>

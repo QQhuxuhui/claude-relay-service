@@ -32,6 +32,9 @@ const ProxyHelper = require('../utils/proxyHelper')
 
 const router = express.Router()
 
+// 导入风险监控服务
+const riskMonitorService = require('../services/riskMonitorService')
+
 // 🛠️ 工具函数：处理可为空的时间字段
 function normalizeNullableDate(value) {
   if (value === undefined || value === null) {
@@ -9268,6 +9271,125 @@ router.post('/droid-accounts/:id/refresh-token', authenticateAdmin, async (req, 
   } catch (error) {
     logger.error(`Failed to refresh Droid account token ${req.params.id}:`, error)
     return res.status(500).json({ error: 'Failed to refresh token', message: error.message })
+  }
+})
+
+// ========================================
+// 风险监控 API (Risk Monitor APIs)
+// ========================================
+
+/**
+ * 获取单个 CCR 账户的风险评分
+ * GET /admin/ccr-accounts/:accountId/risk-score
+ */
+router.get('/ccr-accounts/:accountId/risk-score', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.params
+    const { useCache = 'true' } = req.query
+
+    // 获取风险评分
+    const riskScore = await riskMonitorService.getAccountRiskScore(accountId, {
+      useCache: useCache === 'true'
+    })
+
+    return res.json({
+      success: true,
+      data: riskScore
+    })
+  } catch (error) {
+    logger.error(`Error getting risk score for account ${req.params.accountId}:`, error)
+
+    // 处理账户不存在的情况
+    if (error.message === 'Account not found') {
+      return res.status(404).json({
+        success: false,
+        error: 'Account not found',
+        message: `CCR账户 ${req.params.accountId} 不存在`
+      })
+    }
+
+    // 其他错误
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * 获取所有 CCR 账户的风险概览
+ * GET /admin/dashboard/relay-risk
+ * Query params:
+ *   - provider: 按提供商过滤 (可选)
+ *   - riskLevel: 按风险等级过滤 (可选: low/medium/high/critical)
+ *   - sortBy: 排序字段 (可选: riskScore/costToday/requestsInWindow)
+ */
+router.get('/dashboard/relay-risk', authenticateAdmin, async (req, res) => {
+  try {
+    const { provider, riskLevel, sortBy } = req.query
+
+    // 验证 riskLevel 参数
+    if (riskLevel && !['low', 'medium', 'high', 'critical'].includes(riskLevel.toLowerCase())) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid parameter',
+        message: 'riskLevel must be one of: low, medium, high, critical'
+      })
+    }
+
+    // 验证 sortBy 参数
+    if (sortBy && !['riskScore', 'costToday', 'requestsInWindow'].includes(sortBy)) {
+      return res.status(400).json({
+        success: false,
+        error: 'Invalid parameter',
+        message: 'sortBy must be one of: riskScore, costToday, requestsInWindow'
+      })
+    }
+
+    // 获取风险概览
+    const overview = await riskMonitorService.getAllAccountsRiskOverview({
+      provider,
+      riskLevel,
+      sortBy: sortBy || 'riskScore'
+    })
+
+    return res.json({
+      success: true,
+      data: overview
+    })
+  } catch (error) {
+    logger.error('Error getting relay risk overview:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * 清除风险评分缓存
+ * POST /admin/risk-monitor/clear-cache
+ * Body: { accountId?: string } (可选，不提供则清除所有)
+ */
+router.post('/risk-monitor/clear-cache', authenticateAdmin, async (req, res) => {
+  try {
+    const { accountId } = req.body
+
+    riskMonitorService.clearRiskCache(accountId)
+
+    return res.json({
+      success: true,
+      message: accountId ? `已清除账户 ${accountId} 的风险评分缓存` : '已清除所有账户的风险评分缓存'
+    })
+  } catch (error) {
+    logger.error('Error clearing risk cache:', error)
+    return res.status(500).json({
+      success: false,
+      error: 'Internal server error',
+      message: error.message
+    })
   }
 })
 

@@ -112,14 +112,12 @@ async function diagnoseOpenAIGroups() {
       if (account.accountType === 'group') {
         let foundInGroup = false
         for (const group of openaiGroups) {
-          client
-            .sismember(`account_group_members:${group.id}`, account.id)
-            .then((isMember) => {
-              if (isMember) {
-                console.log(`  ↳ 属于分组: ${group.name}`)
-                foundInGroup = true
-              }
-            })
+          client.sismember(`account_group_members:${group.id}`, account.id).then((isMember) => {
+            if (isMember) {
+              console.log(`  ↳ 属于分组: ${group.name}`)
+              foundInGroup = true
+            }
+          })
         }
         if (!foundInGroup) {
           console.log(`  ↳ ⚠️  标记为group类型但未找到所属分组`)
