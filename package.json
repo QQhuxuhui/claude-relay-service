@@ -32,7 +32,11 @@
     "lint:check": "eslint src/**/*.js cli/**/*.js scripts/**/*.js",
     "format": "prettier --write \"src/**/*.js\" \"cli/**/*.js\" \"scripts/**/*.js\"",
     "format:check": "prettier --check \"src/**/*.js\" \"cli/**/*.js\" \"scripts/**/*.js\"",
-    "docker:build": "docker build -t claude-relay-service .",
+    "docker:build": "bash scripts/docker-build.sh",
+    "docker:build:push": "bash scripts/docker-push.sh",
+    "docker:build:nocache": "bash scripts/docker-build.sh --no-cache",
+    "docker:build:version": "bash scripts/docker-build.sh --version",
+    "docker:list": "bash scripts/docker-build.sh --list-tags",
     "docker:up": "docker-compose up -d",
     "docker:down": "docker-compose down",
     "migrate:apikey-expiry": "node scripts/migrate-apikey-expiry.js",
@@ -45,7 +49,10 @@
     "data:export:encrypted": "node scripts/data-transfer-enhanced.js export --decrypt=false",
     "data:import:enhanced": "node scripts/data-transfer-enhanced.js import",
     "data:debug": "node scripts/debug-redis-keys.js",
-    "test:pricing-fallback": "node scripts/test-pricing-fallback.js"
+    "test:pricing-fallback": "node scripts/test-pricing-fallback.js",
+    "backup": "bash scripts/backup-data.sh",
+    "backup:custom": "bash scripts/backup-data.sh",
+    "restore": "bash scripts/restore-data.sh"
   },
   "dependencies": {
     "@aws-sdk/client-bedrock-runtime": "^3.861.0",

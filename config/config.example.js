@@ -175,6 +175,19 @@ const config = {
     retries: parseInt(process.env.WEBHOOK_RETRIES) || 3 // 重试3次
   },
 
+  // 🆕 多中继账户限流配置 (Multi-Relay Account Limits)
+  // 这些配置仅作为新创建账户的默认值，实际限制由账户级配置决定
+  relayAccountLimits: {
+    // 会话窗口时长（小时）- 用于统计窗口内的请求数
+    sessionWindowHours: parseInt(process.env.RELAY_ACCOUNT_SESSION_WINDOW_HOURS) || 1,
+    // 窗口内最大请求数（0表示不限制）
+    maxRequestsPerWindow: parseInt(process.env.RELAY_ACCOUNT_MAX_REQUESTS_PER_WINDOW) || 0,
+    // 每日最大费用限制（美元，0表示不限制）
+    maxCostPerDay: parseFloat(process.env.RELAY_ACCOUNT_MAX_COST_PER_DAY) || 0,
+    // 调度策略（priority_lru: 优先级+LRU，未来可扩展为weighted_round_robin等）
+    priorityStrategy: process.env.RELAY_ACCOUNT_PRIORITY_STRATEGY || 'priority_lru'
+  },
+
   // 🛠️ 开发配置
   development: {
     debug: process.env.DEBUG === 'true',

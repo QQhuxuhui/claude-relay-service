@@ -710,8 +710,7 @@ async function handleMessagesRequest(req, res) {
             logger.error('❌ All Console accounts reached concurrency limit after retry')
             return res.status(503).json({
               error: 'service_unavailable',
-              message:
-                'All available Claude Console accounts have reached their concurrency limit. Please try again later.'
+              message: '当前模型负载高，请稍后重试'
             })
           }
           // 其他错误继续向下处理
@@ -736,8 +735,7 @@ async function handleMessagesRequest(req, res) {
       if (!res.headersSent) {
         return res.status(503).json({
           error: 'service_unavailable',
-          message:
-            'All available Claude Console accounts have reached their concurrency limit. Please try again later.'
+          message: '当前模型负载高，请稍后重试'
         })
       } else {
         if (!res.destroyed && !res.finished) {
@@ -1071,8 +1069,7 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
         if (!res.headersSent) {
           return res.status(503).json({
             error: 'service_unavailable',
-            message:
-              'All available Claude Console accounts have reached their concurrency limit. Please try again later.'
+            message: '当前模型负载高，请稍后重试'
           })
         }
         if (!res.destroyed && !res.finished) {

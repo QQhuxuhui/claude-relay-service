@@ -1,0 +1,21 @@
+备份时间: 2025-11-11 18:13:04
+备份目录: ./backups/before-new-build
+主机名: GGbond
+备份内容:
+- Redis 数据 (redis_data/)
+- 应用数据 (data/)
+- 日志文件 (logs/)
+- 环境配置 (.env)
+- 应用配置 (config.js)
+- Redis JSON 导出 (redis-export.json)
+
+恢复说明:
+1. 停止服务: docker-compose down
+2. 恢复数据:
+   - cp -r ./backups/before-new-build/redis_data ./
+   - cp -r ./backups/before-new-build/data ./
+   - cp ./backups/before-new-build/.env ./
+3. 启动服务: docker-compose up -d
+
+或使用 JSON 导入:
+   node scripts/data-transfer-enhanced.js import ./backups/before-new-build/redis-export.json

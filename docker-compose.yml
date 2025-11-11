@@ -6,8 +6,8 @@ version: '3.8'
 services:
   # 🚀 Claude Relay Service
   claude-relay:
-    build: .
-    image: weishaw/claude-relay-service:latest
+    image: registry.cn-shanghai.aliyuncs.com/hxh_ai/claude-relay-service:1.0.0
+      #    pull_policy: always  # 每次启动都从远程拉取最新镜像
     restart: unless-stopped
     ports:
       # 绑定地址：生产环境建议使用反向代理，设置 BIND_HOST=127.0.0.1
