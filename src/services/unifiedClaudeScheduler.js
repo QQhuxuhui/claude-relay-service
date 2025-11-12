@@ -139,7 +139,12 @@ class UnifiedClaudeScheduler {
   }
 
   // 🎯 统一调度Claude账号（官方和Console）
-  async selectAccountForApiKey(apiKeyData, sessionHash = null, requestedModel = null) {
+  async selectAccountForApiKey(
+    apiKeyData,
+    sessionHash = null,
+    requestedModel = null,
+    excludedAccounts = []
+  ) {
     try {
       // 解析供应商前缀
       const { vendor, baseModel } = parseVendorPrefixedModel(requestedModel)
@@ -313,8 +318,31 @@ class UnifiedClaudeScheduler {
         }
       }
 
+      // 📝 过滤掉排除列表中的账户
+      let filteredAccounts = availableAccounts
+      if (excludedAccounts && excludedAccounts.length > 0) {
+        filteredAccounts = availableAccounts.filter((account) => {
+          const isExcluded = excludedAccounts.some(
+            (exc) => exc.accountId === account.accountId && exc.accountType === account.accountType
+          )
+          if (isExcluded) {
+            logger.info(`⏭️ Skipping excluded account: ${account.name} (${account.accountId})`)
+          }
+          return !isExcluded
+        })
+
+        if (filteredAccounts.length === 0) {
+          logger.warn('⚠️ All available accounts are in exclusion list, using original list')
+          filteredAccounts = availableAccounts
+        } else {
+          logger.info(
+            `📝 Filtered ${availableAccounts.length - filteredAccounts.length} excluded accounts, ${filteredAccounts.length} remaining`
+          )
+        }
+      }
+
       // 按优先级和最后使用时间排序
-      const sortedAccounts = this._sortAccountsByPriority(availableAccounts)
+      const sortedAccounts = this._sortAccountsByPriority(filteredAccounts)
 
       // 选择第一个账户
       const selectedAccount = sortedAccounts[0]

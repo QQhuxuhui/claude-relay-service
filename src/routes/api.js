@@ -12,6 +12,7 @@ const { getEffectiveModel, parseVendorPrefixedModel } = require('../utils/modelH
 const sessionHelper = require('../utils/sessionHelper')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const { sanitizeUpstreamError } = require('../utils/errorSanitizer')
+const { isRetriableError, getErrorDetails } = require('../utils/errorClassifier')
 const qrCodeService = require('../services/qrCodeService')
 const router = express.Router()
 
@@ -57,9 +58,14 @@ async function handleMessagesRequest(req, res) {
       })
     }
 
-    // 🔄 并发满额重试标志：最多重试一次（使用req对象存储状态）
-    if (req._concurrencyRetryAttempted === undefined) {
-      req._concurrencyRetryAttempted = false
+    // 🔄 统一重试标志：最多重试一次（使用req对象存储状态）
+    if (req._retryAttempted === undefined) {
+      req._retryAttempted = false
+    }
+
+    // 📝 请求级排除列表：记录本次请求失败的账户，避免重试时再次选中
+    if (!req._excludedAccounts) {
+      req._excludedAccounts = []
     }
 
     // 严格的输入验证
@@ -136,7 +142,8 @@ async function handleMessagesRequest(req, res) {
         const selection = await unifiedClaudeScheduler.selectAccountForApiKey(
           req.apiKey,
           sessionHash,
-          requestedModel
+          requestedModel,
+          req._excludedAccounts
         )
         ;({ accountId, accountType } = selection)
       } catch (error) {
@@ -498,7 +505,8 @@ async function handleMessagesRequest(req, res) {
         const selection = await unifiedClaudeScheduler.selectAccountForApiKey(
           req.apiKey,
           sessionHash,
-          requestedModel
+          requestedModel,
+          req._excludedAccounts
         )
         ;({ accountId, accountType } = selection)
       } catch (error) {
@@ -684,61 +692,84 @@ async function handleMessagesRequest(req, res) {
   } catch (error) {
     let handledError = error
 
-    // 🔄 并发满额降级处理：捕获CONSOLE_ACCOUNT_CONCURRENCY_FULL错误
-    if (
-      handledError.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL' &&
-      !req._concurrencyRetryAttempted
-    ) {
-      req._concurrencyRetryAttempted = true
-      logger.warn(
-        `⚠️ Console account ${handledError.accountId} concurrency full, attempting fallback to other accounts...`
-      )
+    // 🔄 统一重试逻辑：处理所有可重试的错误
+    if (isRetriableError(handledError) && !req._retryAttempted && !res.headersSent) {
+      req._retryAttempted = true
 
-      // 只有在响应头未发送时才能重试
-      if (!res.headersSent) {
-        try {
-          // 清理粘性会话映射（如果存在）
-          const sessionHash = sessionHelper.generateSessionHash(req.body)
-          await unifiedClaudeScheduler.clearSessionMapping(sessionHash)
+      // 获取错误详情用于日志
+      const errorDetails = getErrorDetails(handledError)
 
-          logger.info('🔄 Session mapping cleared, retrying handleMessagesRequest...')
+      logger.warn(`⚠️ Retriable error detected, attempting fallback to different account...`, {
+        errorMessage: errorDetails.message,
+        errorCode: errorDetails.code,
+        statusCode: errorDetails.statusCode,
+        accountId: handledError.accountId
+      })
 
-          // 递归重试整个请求处理（会选择新账户）
-          return await handleMessagesRequest(req, res)
-        } catch (retryError) {
-          // 重试失败
-          if (retryError.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL') {
-            logger.error('❌ All Console accounts reached concurrency limit after retry')
+      try {
+        // 📝 将失败的账户加入排除列表，避免重试时再次选中
+        if (handledError.accountId) {
+          req._excludedAccounts.push({
+            accountId: handledError.accountId,
+            accountType: handledError.accountType || 'unknown'
+          })
+          logger.info(
+            `📝 Added account to exclusion list: ${handledError.accountId} (${handledError.accountType || 'unknown'})`
+          )
+        }
+
+        // 清理粘性会话映射（允许选择不同的账户）
+        const sessionHash = sessionHelper.generateSessionHash(req.body)
+        await unifiedClaudeScheduler.clearSessionMapping(sessionHash)
+
+        logger.info('🔄 Session mapping cleared, retrying with different account...')
+
+        // 递归重试整个请求处理（会选择新账户）
+        return await handleMessagesRequest(req, res)
+      } catch (retryError) {
+        // 重试失败，记录详细错误信息
+        const retryErrorDetails = getErrorDetails(retryError)
+
+        logger.error('❌ Retry failed', {
+          originalError: errorDetails,
+          retryError: retryErrorDetails
+        })
+
+        // 特殊处理并发满额错误
+        if (retryError.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL') {
+          if (!res.headersSent) {
             return res.status(503).json({
               error: 'service_unavailable',
               message: '当前模型负载高，请稍后重试'
             })
           }
-          // 其他错误继续向下处理
-          handledError = retryError
         }
-      } else {
-        // 响应头已发送，无法重试
-        logger.error('❌ Cannot retry concurrency full error - response headers already sent')
-        if (!res.destroyed && !res.finished) {
-          res.end()
-        }
-        return undefined
+
+        // 其他错误继续向下处理
+        handledError = retryError
       }
     }
 
-    // 🚫 第二次并发满额错误：已经重试过，直接返回503
-    if (
-      handledError.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL' &&
-      req._concurrencyRetryAttempted
-    ) {
-      logger.error('❌ All Console accounts reached concurrency limit (retry already attempted)')
-      if (!res.headersSent) {
-        return res.status(503).json({
-          error: 'service_unavailable',
-          message: '当前模型负载高，请稍后重试'
-        })
-      } else {
+    // 🚫 响应头已发送或已经重试过
+    if (req._retryAttempted && isRetriableError(handledError)) {
+      logger.error('❌ Retry already attempted, cannot retry again', {
+        errorCode: handledError.code,
+        statusCode: handledError.statusCode
+      })
+
+      // 特殊处理并发满额错误
+      if (handledError.code === 'CONSOLE_ACCOUNT_CONCURRENCY_FULL') {
+        if (!res.headersSent) {
+          return res.status(503).json({
+            error: 'service_unavailable',
+            message: '当前模型负载高，请稍后重试'
+          })
+        }
+      }
+
+      // 如果响应头已发送，只能结束连接
+      if (res.headersSent) {
+        logger.error('❌ Cannot send error response - headers already sent')
         if (!res.destroyed && !res.finished) {
           res.end()
         }
@@ -961,7 +992,8 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
     const { accountId, accountType } = await unifiedClaudeScheduler.selectAccountForApiKey(
       req.apiKey,
       sessionHash,
-      requestedModel
+      requestedModel,
+      req._excludedAccounts || []
     )
 
     if (accountType === 'ccr') {
