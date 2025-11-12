@@ -70,13 +70,29 @@
               </div>
             </div>
           </div>
-          <div class="flex items-center space-x-4">
-            <div class="text-sm text-gray-700 dark:text-gray-300">
+          <div class="flex items-center space-x-2 sm:space-x-4">
+            <div class="hidden text-sm text-gray-700 dark:text-gray-300 sm:block">
               Welcome, <span class="font-medium">{{ userStore.userName }}</span>
             </div>
 
             <!-- 主题切换按钮 -->
             <ThemeToggle mode="icon" />
+
+            <!-- QR Code Buttons -->
+            <QrCodeButton
+              v-if="qrCodes.customer_service"
+              :base64-data="qrCodes.customer_service.base64Data"
+              :icon="ChatBubbleLeftRightIcon"
+              label="Customer Service"
+              type="customer_service"
+            />
+            <QrCodeButton
+              v-if="qrCodes.xianyu_store"
+              :base64-data="qrCodes.xianyu_store.base64Data"
+              :icon="ShoppingBagIcon"
+              label="Xianyu Store"
+              type="xianyu_store"
+            />
 
             <button
               class="rounded-md px-3 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-300"
@@ -345,6 +361,9 @@ import ThemeToggle from '@/components/common/ThemeToggle.vue'
 import UserApiKeysManager from '@/components/user/UserApiKeysManager.vue'
 import UserUsageStats from '@/components/user/UserUsageStats.vue'
 import TutorialView from '@/views/TutorialView.vue'
+import QrCodeButton from '@/components/user/QrCodeButton.vue'
+import qrCodeAPI from '@/services/qrCodeService'
+import { ChatBubbleLeftRightIcon, ShoppingBagIcon } from '@heroicons/vue/24/outline'
 
 const router = useRouter()
 const userStore = useUserStore()
@@ -353,6 +372,10 @@ const themeStore = useThemeStore()
 const activeTab = ref('overview')
 const userProfile = ref(null)
 const apiKeysStats = ref({ active: 0, deleted: 0 })
+const qrCodes = ref({
+  customer_service: null,
+  xianyu_store: null
+})
 
 const formatNumber = (num) => {
   if (num >= 1000000) {
@@ -423,11 +446,25 @@ const loadApiKeysStats = async () => {
   }
 }
 
+const loadQrCodes = async () => {
+  try {
+    const codes = await qrCodeAPI.fetchPublicQrCodes()
+    // Convert array to object keyed by type
+    codes.forEach((code) => {
+      qrCodes.value[code.type] = code
+    })
+  } catch (error) {
+    console.error('Failed to load QR codes:', error)
+    // Silent fail - QR codes are optional feature
+  }
+}
+
 onMounted(() => {
   // 初始化主题
   themeStore.initTheme()
   loadUserProfile()
   loadApiKeysStats()
+  loadQrCodes()
 })
 </script>
 

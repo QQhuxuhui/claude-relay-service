@@ -13,6 +13,7 @@ const redis = require('../models/redis')
 const ClaudeCodeValidator = require('../validators/clients/claudeCodeValidator')
 const { formatDateWithTimezone } = require('../utils/dateHelper')
 const runtimeAddon = require('../utils/runtimeAddon')
+const timeoutManager = require('../utils/timeoutManager')
 
 const RUNTIME_EVENT_FMT_CLAUDE_REQ = 'fmtClaudeReq'
 
@@ -1006,7 +1007,7 @@ class ClaudeRelayService {
           ...finalHeaders
         },
         agent: proxyAgent,
-        timeout: config.requestTimeout || 600000
+        timeout: timeoutManager.getAccountTimeout(account)
       }
 
       // 使用统一 User-Agent 或客户端提供的，最后使用默认值
@@ -1322,7 +1323,7 @@ class ClaudeRelayService {
           ...finalHeaders
         },
         agent: proxyAgent,
-        timeout: config.requestTimeout || 600000
+        timeout: timeoutManager.getAccountTimeout(account)
       }
 
       // 使用统一 User-Agent 或客户端提供的，最后使用默认值

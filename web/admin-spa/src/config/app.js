@@ -1,7 +1,8 @@
 // 应用配置
 export const APP_CONFIG = {
   // 应用基础路径
-  basePath: import.meta.env.VITE_APP_BASE_URL || (import.meta.env.DEV ? '/admin/' : '/web/admin/'),
+  // 统一使用 /admin-next/ 以匹配后端静态文件路径和 Vite base
+  basePath: import.meta.env.VITE_APP_BASE_URL || '/admin-next/',
 
   // 应用标题
   title: import.meta.env.VITE_APP_TITLE || 'Claude Relay Service - 管理后台',

@@ -9,6 +9,7 @@ const {
   sanitizeErrorMessage,
   isAccountDisabledError
 } = require('../utils/errorSanitizer')
+const timeoutManager = require('../utils/timeoutManager')
 
 class ClaudeConsoleRelayService {
   constructor() {
@@ -160,7 +161,7 @@ class ClaudeConsoleRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: config.requestTimeout || 600000,
+        timeout: timeoutManager.getAccountTimeout(account),
         signal: abortController.signal,
         validateStatus: () => true // 接受所有状态码
       }
@@ -547,7 +548,7 @@ class ClaudeConsoleRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: config.requestTimeout || 600000,
+        timeout: timeoutManager.getAccountTimeout(account),
         responseType: 'stream',
         validateStatus: () => true // 接受所有状态码
       }
