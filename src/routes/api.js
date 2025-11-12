@@ -1146,7 +1146,8 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
 })
 
 // 📱 QR Code 公共端点 - 用户获取二维码（客服和闲鱼店铺）
-router.get('/qr-codes', authenticateApiKey, async (req, res) => {
+// 注意：此端点为公开访问，无需认证
+router.get('/qr-codes', async (req, res) => {
   try {
     // 获取所有QR码（仅返回type和base64Data字段）
     const qrCodes = await qrCodeService.getAllQrCodesPublic()

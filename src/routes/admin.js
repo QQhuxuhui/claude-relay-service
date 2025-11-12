@@ -2897,10 +2897,7 @@ router.put('/claude-console-accounts/:accountId', authenticateAdmin, async (req,
     if (mappedUpdates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroups(accountId)
-        for (const oldGroup of oldGroups) {
-          await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
-        }
+        await accountGroupService.removeAccountFromAllGroups(accountId)
       }
       // 如果新类型是分组，处理多分组支持
       if (mappedUpdates.accountType === 'group') {
@@ -3284,9 +3281,9 @@ router.post('/ccr-accounts', authenticateAdmin, async (req, res) => {
       maxCostPerDay: maxCostPerDay !== undefined ? maxCostPerDay : undefined
     })
 
-    // 如果是分组类型，将账户添加到分组
+    // 如果是分组类型，将账户添加到分组（CCR 归属 Claude 平台分组）
     if (accountType === 'group' && groupId) {
-      await accountGroupService.addAccountToGroup(newAccount.id, groupId)
+      await accountGroupService.addAccountToGroup(newAccount.id, groupId, 'claude')
     }
 
     logger.success(`🔧 Admin created CCR account: ${name}`)
@@ -3357,10 +3354,7 @@ router.put('/ccr-accounts/:accountId', authenticateAdmin, async (req, res) => {
     if (mappedUpdates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroups(accountId)
-        for (const oldGroup of oldGroups) {
-          await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
-        }
+        await accountGroupService.removeAccountFromAllGroups(accountId)
       }
       // 如果新类型是分组，处理多分组支持
       if (mappedUpdates.accountType === 'group') {
@@ -4199,10 +4193,7 @@ router.put('/gemini-accounts/:accountId', authenticateAdmin, async (req, res) =>
     if (mappedUpdates.accountType !== undefined) {
       // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroups = await accountGroupService.getAccountGroups(accountId)
-        for (const oldGroup of oldGroups) {
-          await accountGroupService.removeAccountFromGroup(accountId, oldGroup.id)
-        }
+        await accountGroupService.removeAccountFromAllGroups(accountId)
       }
       // 如果新类型是分组，处理多分组支持
       if (mappedUpdates.accountType === 'group') {

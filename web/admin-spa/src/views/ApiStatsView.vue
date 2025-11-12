@@ -15,6 +15,24 @@
             <ThemeToggle mode="dropdown" />
           </div>
 
+          <!-- QR Code Buttons -->
+          <QrCodeButton
+            v-if="qrCodes.customer_service"
+            :base64-data="qrCodes.customer_service.base64Data"
+            :icon="ChatBubbleLeftRightIcon"
+            label="客服"
+            show-text
+            type="customer_service"
+          />
+          <QrCodeButton
+            v-if="qrCodes.xianyu_store"
+            :base64-data="qrCodes.xianyu_store.base64Data"
+            :icon="ShoppingBagIcon"
+            label="闲鱼店铺"
+            show-text
+            type="xianyu_store"
+          />
+
           <!-- 分隔线 -->
           <div
             v-if="oemSettings.ldapEnabled || oemSettings.showAdminButton !== false"
@@ -165,6 +183,9 @@ import LimitConfig from '@/components/apistats/LimitConfig.vue'
 import AggregatedStatsCard from '@/components/apistats/AggregatedStatsCard.vue'
 import ModelUsageStats from '@/components/apistats/ModelUsageStats.vue'
 import TutorialView from './TutorialView.vue'
+import QrCodeButton from '@/components/user/QrCodeButton.vue'
+import qrCodeAPI from '@/services/qrCodeService'
+import { ChatBubbleLeftRightIcon, ShoppingBagIcon } from '@heroicons/vue/24/outline'
 
 const route = useRoute()
 const apiStatsStore = useApiStatsStore()
@@ -175,6 +196,12 @@ const currentTab = ref('stats')
 
 // 主题相关
 const isDarkMode = computed(() => themeStore.isDarkMode)
+
+// QR Codes
+const qrCodes = ref({
+  customer_service: null,
+  xianyu_store: null
+})
 
 const {
   apiKey,
@@ -207,6 +234,20 @@ const handleKeyDown = (event) => {
   }
 }
 
+// 加载二维码
+const loadQrCodes = async () => {
+  try {
+    const codes = await qrCodeAPI.fetchPublicQrCodes()
+    // Convert array to object keyed by type
+    codes.forEach((code) => {
+      qrCodes.value[code.type] = code
+    })
+  } catch (error) {
+    console.error('Failed to load QR codes:', error)
+    // Silent fail - QR codes are optional feature
+  }
+}
+
 // 初始化
 onMounted(() => {
   // API Stats Page loaded
@@ -216,6 +257,9 @@ onMounted(() => {
 
   // 加载 OEM 设置
   loadOemSettings()
+
+  // 加载二维码
+  loadQrCodes()
 
   // 检查 URL 参数
   const urlApiId = route.query.apiId
