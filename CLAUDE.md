@@ -540,6 +540,10 @@ npm run setup  # 自动生成密钥并创建管理员账户
   - `api_key_hash:{hash}` - 哈希到ID的快速映射
   - `api_key_usage:{keyId}` - 使用统计数据
   - `api_key_cost:{keyId}` - 成本统计数据
+- **QR Codes**:
+  - `qr_code:customer_service` - 客服二维码（Base64编码）
+  - `qr_code:xianyu_store` - 闲鱼店铺二维码（Base64编码）
+  - 字段: type, base64Data, updatedAt, updatedBy
 - **账户数据**（多类型）:
   - `claude_account:{id}` - Claude官方账户（加密的OAuth数据）
   - `claude_console_account:{id}` - Claude Console账户

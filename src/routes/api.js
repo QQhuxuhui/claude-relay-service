@@ -12,6 +12,7 @@ const { getEffectiveModel, parseVendorPrefixedModel } = require('../utils/modelH
 const sessionHelper = require('../utils/sessionHelper')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const { sanitizeUpstreamError } = require('../utils/errorSanitizer')
+const qrCodeService = require('../services/qrCodeService')
 const router = express.Router()
 
 function queueRateLimitUpdate(rateLimitInfo, usageSummary, model, context = '') {
@@ -1109,6 +1110,28 @@ router.post('/v1/messages/count_tokens', authenticateApiKey, async (req, res) =>
       }
       return
     }
+  }
+})
+
+// 📱 QR Code 公共端点 - 用户获取二维码（客服和闲鱼店铺）
+router.get('/qr-codes', authenticateApiKey, async (req, res) => {
+  try {
+    // 获取所有QR码（仅返回type和base64Data字段）
+    const qrCodes = await qrCodeService.getAllQrCodesPublic()
+
+    // 设置缓存头（5分钟）
+    res.setHeader('Cache-Control', 'public, max-age=300')
+
+    return res.json({
+      success: true,
+      data: qrCodes
+    })
+  } catch (error) {
+    logger.error('Failed to get public QR codes:', error)
+    return res.status(500).json({
+      error: 'Failed to get QR codes',
+      message: error.message
+    })
   }
 })
 

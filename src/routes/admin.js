@@ -35,6 +35,19 @@ const router = express.Router()
 // 导入风险监控服务
 const riskMonitorService = require('../services/riskMonitorService')
 
+// 导入QR码服务和工具
+const qrCodeService = require('../services/qrCodeService')
+const imageValidator = require('../utils/imageValidator')
+const multer = require('multer')
+
+// 配置Multer用于内存存储
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 500 * 1024 // 500KB
+  }
+})
+
 // 🛠️ 工具函数：处理可为空的时间字段
 function normalizeNullableDate(value) {
   if (value === undefined || value === null) {
@@ -9409,6 +9422,237 @@ router.post('/risk-monitor/clear-cache', authenticateAdmin, async (req, res) => 
     return res.status(500).json({
       success: false,
       error: 'Internal server error',
+      message: error.message
+    })
+  }
+})
+
+// ==================== QR Code Management Routes ====================
+
+/**
+ * Upload new QR code
+ * POST /admin/qr-codes
+ * Body: multipart/form-data with 'image' file and 'type' field
+ */
+router.post('/qr-codes', authenticateAdmin, upload.single('image'), async (req, res) => {
+  try {
+    const { type } = req.body
+    const { file } = req
+
+    // Validate type parameter
+    if (!type || !qrCodeService.VALID_QR_TYPES.includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid QR code type',
+        message: `Type must be one of: ${qrCodeService.VALID_QR_TYPES.join(', ')}`
+      })
+    }
+
+    // Validate file exists
+    if (!file) {
+      return res.status(400).json({
+        error: 'No file provided',
+        message: 'Please upload an image file'
+      })
+    }
+
+    // Validate image format and size
+    const validation = imageValidator.validateImage(file)
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Invalid image',
+        message: validation.error
+      })
+    }
+
+    // Check if QR code already exists
+    const existing = await qrCodeService.getQrCode(type)
+    if (existing) {
+      return res.status(400).json({
+        error: 'QR code already exists',
+        message: `QR code of type '${type}' already exists. Use PUT to update.`
+      })
+    }
+
+    // Convert to Base64
+    const base64Data = imageValidator.convertToBase64(file)
+
+    // Create QR code
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    const qrCode = await qrCodeService.createQrCode(type, base64Data, adminId)
+
+    logger.info(`QR code created: ${type} by ${adminId}`)
+
+    return res.status(201).json({
+      success: true,
+      data: qrCode
+    })
+  } catch (error) {
+    logger.error('Failed to create QR code:', error)
+    return res.status(500).json({
+      error: 'Failed to create QR code',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * Get all QR codes
+ * GET /admin/qr-codes
+ */
+router.get('/qr-codes', authenticateAdmin, async (req, res) => {
+  try {
+    const qrCodes = await qrCodeService.getAllQrCodes()
+
+    return res.json({
+      success: true,
+      data: qrCodes
+    })
+  } catch (error) {
+    logger.error('Failed to get QR codes:', error)
+    return res.status(500).json({
+      error: 'Failed to get QR codes',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * Get specific QR code by type
+ * GET /admin/qr-codes/:type
+ */
+router.get('/qr-codes/:type', authenticateAdmin, async (req, res) => {
+  try {
+    const { type } = req.params
+
+    if (!qrCodeService.VALID_QR_TYPES.includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid QR code type',
+        message: `Type must be one of: ${qrCodeService.VALID_QR_TYPES.join(', ')}`
+      })
+    }
+
+    const qrCode = await qrCodeService.getQrCode(type)
+
+    if (!qrCode) {
+      return res.status(404).json({
+        error: 'QR code not found',
+        message: `No QR code found for type: ${type}`
+      })
+    }
+
+    return res.json({
+      success: true,
+      data: qrCode
+    })
+  } catch (error) {
+    logger.error('Failed to get QR code:', error)
+    return res.status(500).json({
+      error: 'Failed to get QR code',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * Update existing QR code
+ * PUT /admin/qr-codes/:type
+ * Body: multipart/form-data with 'image' file
+ */
+router.put('/qr-codes/:type', authenticateAdmin, upload.single('image'), async (req, res) => {
+  try {
+    const { type } = req.params
+    const { file } = req
+
+    // Validate type parameter
+    if (!qrCodeService.VALID_QR_TYPES.includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid QR code type',
+        message: `Type must be one of: ${qrCodeService.VALID_QR_TYPES.join(', ')}`
+      })
+    }
+
+    // Check if QR code exists
+    const existing = await qrCodeService.getQrCode(type)
+    if (!existing) {
+      return res.status(404).json({
+        error: 'QR code not found',
+        message: `No QR code found for type: ${type}`
+      })
+    }
+
+    // Validate file exists
+    if (!file) {
+      return res.status(400).json({
+        error: 'No file provided',
+        message: 'Please upload an image file'
+      })
+    }
+
+    // Validate image format and size
+    const validation = imageValidator.validateImage(file)
+    if (!validation.valid) {
+      return res.status(400).json({
+        error: 'Invalid image',
+        message: validation.error
+      })
+    }
+
+    // Convert to Base64
+    const base64Data = imageValidator.convertToBase64(file)
+
+    // Update QR code
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    const qrCode = await qrCodeService.updateQrCode(type, base64Data, adminId)
+
+    logger.info(`QR code updated: ${type} by ${adminId}`)
+
+    return res.json({
+      success: true,
+      data: qrCode
+    })
+  } catch (error) {
+    logger.error('Failed to update QR code:', error)
+    return res.status(500).json({
+      error: 'Failed to update QR code',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * Delete QR code
+ * DELETE /admin/qr-codes/:type
+ */
+router.delete('/qr-codes/:type', authenticateAdmin, async (req, res) => {
+  try {
+    const { type } = req.params
+
+    // Validate type parameter
+    if (!qrCodeService.VALID_QR_TYPES.includes(type)) {
+      return res.status(400).json({
+        error: 'Invalid QR code type',
+        message: `Type must be one of: ${qrCodeService.VALID_QR_TYPES.join(', ')}`
+      })
+    }
+
+    // Delete QR code
+    const deleted = await qrCodeService.deleteQrCode(type)
+
+    if (!deleted) {
+      return res.status(404).json({
+        error: 'QR code not found',
+        message: `No QR code found for type: ${type}`
+      })
+    }
+
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    logger.info(`QR code deleted: ${type} by ${adminId}`)
+
+    return res.status(204).send()
+  } catch (error) {
+    logger.error('Failed to delete QR code:', error)
+    return res.status(500).json({
+      error: 'Failed to delete QR code',
       message: error.message
     })
   }

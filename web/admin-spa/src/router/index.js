@@ -16,6 +16,7 @@ const TutorialView = () => import('@/views/TutorialView.vue')
 const SettingsView = () => import('@/views/SettingsView.vue')
 const ApiStatsView = () => import('@/views/ApiStatsView.vue')
 const RiskMonitorView = () => import('@/views/RiskMonitorView.vue')
+const QrCodeManagementView = () => import('@/views/QrCodeManagementView.vue')
 
 const routes = [
   {
@@ -143,6 +144,18 @@ const routes = [
         path: '',
         name: 'RiskMonitor',
         component: RiskMonitorView
+      }
+    ]
+  },
+  {
+    path: '/qr-codes',
+    component: MainLayout,
+    meta: { requiresAuth: true },
+    children: [
+      {
+        path: '',
+        name: 'QrCodes',
+        component: QrCodeManagementView
       }
     ]
   },

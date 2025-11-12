@@ -40,6 +40,7 @@ const tabRouteMap = computed(() => {
     apiKeys: '/api-keys',
     accounts: '/accounts',
     riskMonitor: '/risk-monitor',
+    qrCodes: '/qr-codes',
     tutorial: '/tutorial',
     settings: '/settings'
   }
@@ -69,6 +70,7 @@ const initActiveTab = () => {
       ApiKeys: 'apiKeys',
       Accounts: 'accounts',
       RiskMonitor: 'riskMonitor',
+      QrCodes: 'qrCodes',
       Tutorial: 'tutorial',
       Settings: 'settings'
     }
@@ -99,6 +101,7 @@ watch(
         ApiKeys: 'apiKeys',
         Accounts: 'accounts',
         RiskMonitor: 'riskMonitor',
+        QrCodes: 'qrCodes',
         Tutorial: 'tutorial',
         Settings: 'settings'
       }
