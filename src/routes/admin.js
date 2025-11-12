@@ -7445,6 +7445,7 @@ router.post('/openai-accounts', authenticateAdmin, async (req, res) => {
       name,
       description: description || '',
       accountType: accountType || 'shared',
+      groupId: groupId || null,
       priority: priority || 50,
       rateLimitDuration:
         rateLimitDuration !== undefined && rateLimitDuration !== null ? rateLimitDuration : 60,
@@ -7686,17 +7687,37 @@ router.put('/openai-accounts/:id', authenticateAdmin, async (req, res) => {
     }
 
     // 处理分组的变更
-    if (mappedUpdates.accountType !== undefined) {
+    const newAccountType =
+      mappedUpdates.accountType !== undefined
+        ? mappedUpdates.accountType
+        : currentAccount.accountType
+    const newGroupId =
+      mappedUpdates.groupId !== undefined ? mappedUpdates.groupId : currentAccount.groupId
+    const accountTypeChanged =
+      mappedUpdates.accountType !== undefined &&
+      mappedUpdates.accountType !== currentAccount.accountType
+    const groupIdChanged =
+      mappedUpdates.groupId !== undefined && mappedUpdates.groupId !== currentAccount.groupId
+
+    // 如果账户类型改变或者分组ID改变，需要更新分组关系
+    if (accountTypeChanged || groupIdChanged) {
       // 如果之前是分组类型，需要从原分组中移除
       if (currentAccount.accountType === 'group') {
         const oldGroup = await accountGroupService.getAccountGroup(id)
         if (oldGroup) {
           await accountGroupService.removeAccountFromGroup(id, oldGroup.id)
+          logger.info(`🔄 从分组 ${oldGroup.name} 中移除账户 ${id}`)
         }
       }
       // 如果新类型是分组，添加到新分组
-      if (mappedUpdates.accountType === 'group' && mappedUpdates.groupId) {
-        await accountGroupService.addAccountToGroup(id, mappedUpdates.groupId, 'openai')
+      if (newAccountType === 'group' && newGroupId) {
+        await accountGroupService.addAccountToGroup(id, newGroupId, 'openai')
+        logger.info(`✅ 将账户 ${id} 添加到分组 ${newGroupId}`)
+      }
+      // 如果从分组类型改为其他类型，清空 groupId 以保持数据一致性
+      if (currentAccount.accountType === 'group' && newAccountType !== 'group') {
+        mappedUpdates.groupId = null
+        logger.info(`🧹 清空账户 ${id} 的 groupId (类型从 group 改为 ${newAccountType})`)
       }
     }
 
