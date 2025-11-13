@@ -6,6 +6,7 @@ const azureOpenaiAccountService = require('../services/azureOpenaiAccountService
 const azureOpenaiRelayService = require('../services/azureOpenaiRelayService')
 const apiKeyService = require('../services/apiKeyService')
 const crypto = require('crypto')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // 支持的模型列表 - 基于真实的 Azure OpenAI 模型
 const ALLOWED_MODELS = {
@@ -223,12 +224,18 @@ router.post('/chat/completions', authenticateApiKey, async (req, res) => {
 
     if (!res.headersSent) {
       const statusCode = error.response?.status || 500
-      const errorMessage =
+      const rawMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
+
+      // 对错误信息进行脱敏
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      logger.warn(
+        `🧹 [SANITIZED] Azure OpenAI error (${statusCode}): ${sanitizedMessage.substring(0, 100)}`
+      )
 
       res.status(statusCode).json({
         error: {
-          message: errorMessage,
+          message: sanitizedMessage,
           type: 'azure_openai_error',
           code: error.code || 'unknown'
         }
@@ -316,12 +323,18 @@ router.post('/responses', authenticateApiKey, async (req, res) => {
 
     if (!res.headersSent) {
       const statusCode = error.response?.status || 500
-      const errorMessage =
+      const rawMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
+
+      // 对错误信息进行脱敏
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      logger.warn(
+        `🧹 [SANITIZED] Azure OpenAI responses error (${statusCode}): ${sanitizedMessage.substring(0, 100)}`
+      )
 
       res.status(statusCode).json({
         error: {
-          message: errorMessage,
+          message: sanitizedMessage,
           type: 'azure_openai_error',
           code: error.code || 'unknown'
         }
@@ -381,12 +394,18 @@ router.post('/embeddings', authenticateApiKey, async (req, res) => {
 
     if (!res.headersSent) {
       const statusCode = error.response?.status || 500
-      const errorMessage =
+      const rawMessage =
         error.response?.data?.error?.message || error.message || 'Internal server error'
+
+      // 对错误信息进行脱敏
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      logger.warn(
+        `🧹 [SANITIZED] Azure OpenAI embeddings error (${statusCode}): ${sanitizedMessage.substring(0, 100)}`
+      )
 
       res.status(statusCode).json({
         error: {
-          message: errorMessage,
+          message: sanitizedMessage,
           type: 'azure_openai_error',
           code: error.code || 'unknown'
         }

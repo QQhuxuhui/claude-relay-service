@@ -8,6 +8,7 @@ const redis = require('../models/redis')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const logger = require('../utils/logger')
 const runtimeAddon = require('../utils/runtimeAddon')
+const { sanitizeUpstreamError, sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 const SYSTEM_PROMPT = 'You are Droid, an AI software engineering agent built by Factory.'
 const RUNTIME_EVENT_FMT_PAYLOAD = 'fmtPayload'
@@ -348,16 +349,31 @@ class DroidRelayService {
       }
 
       if (error.response) {
-        // HTTP 错误响应
+        // HTTP 错误响应 - 需要脱敏处理
+        let sanitizedData
+        if (error.response.data) {
+          if (typeof error.response.data === 'string') {
+            sanitizedData = sanitizeErrorMessage(error.response.data)
+            logger.warn(
+              `🧹 [SANITIZED] Droid error response (${error.response.status}): ${sanitizedData.substring(0, 100)}`
+            )
+          } else {
+            sanitizedData = sanitizeUpstreamError(error.response.data)
+            logger.warn(
+              `🧹 [SANITIZED] Droid error response (${error.response.status}): ${JSON.stringify(sanitizedData)}`
+            )
+          }
+        } else {
+          sanitizedData = {
+            error: 'upstream_error',
+            message: error.message
+          }
+        }
+
         return {
           statusCode: error.response.status,
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(
-            error.response.data || {
-              error: 'upstream_error',
-              message: error.message
-            }
-          )
+          body: JSON.stringify(sanitizedData)
         }
       }
 
@@ -503,7 +519,7 @@ class DroidRelayService {
           res.on('end', () => {
             logger.info('✅ res.end() reached')
             const body = Buffer.concat(chunks).toString()
-            logger.error(`❌ Factory.ai error response body: ${body || '(empty)'}`)
+            logger.error(`❌ Factory.ai error response body (raw): ${body || '(empty)'}`)
             if (res.statusCode >= 400 && res.statusCode < 500) {
               this._handleUpstreamClientError(res.statusCode, {
                 account,
@@ -515,11 +531,28 @@ class DroidRelayService {
                 logger.error('❌ 处理 Droid 流式4xx 异常失败:', handlingError)
               })
             }
-            if (!clientResponse.headersSent) {
-              clientResponse.status(res.statusCode).json({
+
+            // 对错误数据进行脱敏
+            let sanitizedData
+            try {
+              const errorJson = JSON.parse(body)
+              sanitizedData = sanitizeUpstreamError(errorJson)
+              logger.warn(
+                `🧹 [Stream] [SANITIZED] Droid error (${res.statusCode}): ${JSON.stringify(sanitizedData)}`
+              )
+            } catch (e) {
+              // 非JSON格式，作为纯文本脱敏
+              sanitizedData = {
                 error: 'upstream_error',
-                details: body
-              })
+                details: sanitizeErrorMessage(body)
+              }
+              logger.warn(
+                `🧹 [Stream] [SANITIZED] Droid error (${res.statusCode}): ${sanitizedData.details.substring(0, 100)}`
+              )
+            }
+
+            if (!clientResponse.headersSent) {
+              clientResponse.status(res.statusCode).json(sanitizedData)
             }
             resolveOnce({ statusCode: res.statusCode, streaming: true })
           })

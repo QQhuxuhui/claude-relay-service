@@ -1,9 +1,9 @@
 const axios = require('axios')
 const ccrAccountService = require('./ccrAccountService')
 const logger = require('../utils/logger')
-const config = require('../../config/config')
 const { parseVendorPrefixedModel } = require('../utils/modelHelper')
 const timeoutManager = require('../utils/timeoutManager')
+const { sanitizeUpstreamError, sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 class CcrRelayService {
   constructor() {
@@ -122,7 +122,7 @@ class CcrRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, requestBody),
         signal: abortController.signal,
         validateStatus: () => true // 接受所有状态码
       }
@@ -211,9 +211,28 @@ class CcrRelayService {
       // 更新最后使用时间
       await this._updateLastUsedTime(accountId)
 
-      const responseBody =
-        typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
-      logger.debug(`[DEBUG] Final response body to return: ${responseBody}`)
+      // 对错误响应进行脱敏处理
+      let responseBody
+      if (response.status >= 400) {
+        // 错误响应需要脱敏
+        if (typeof response.data === 'string') {
+          responseBody = sanitizeErrorMessage(response.data)
+          logger.warn(
+            `🧹 [SANITIZED] Error response from CCR (${response.status}): ${responseBody.substring(0, 100)}`
+          )
+        } else {
+          const sanitized = sanitizeUpstreamError(response.data)
+          responseBody = JSON.stringify(sanitized)
+          logger.warn(
+            `🧹 [SANITIZED] Error response from CCR (${response.status}): ${JSON.stringify(sanitized)}`
+          )
+        }
+      } else {
+        // 成功响应直接返回
+        responseBody =
+          typeof response.data === 'string' ? response.data : JSON.stringify(response.data)
+        logger.debug(`[DEBUG] Success response body to return: ${responseBody.substring(0, 200)}`)
+      }
 
       return {
         statusCode: response.status,
@@ -351,7 +370,7 @@ class CcrRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, body),
         responseType: 'stream',
         validateStatus: () => true // 接受所有状态码
       }
@@ -416,15 +435,31 @@ class CcrRelayService {
               responseStream.writeHead(response.status, errorHeaders)
             }
 
-            // 直接透传错误数据，不进行包装
+            // 收集错误数据并脱敏后再返回
+            let errorBuffer = ''
             response.data.on('data', (chunk) => {
-              if (!responseStream.destroyed) {
-                responseStream.write(chunk)
-              }
+              errorBuffer += chunk.toString()
             })
 
             response.data.on('end', () => {
               if (!responseStream.destroyed) {
+                // 对错误数据进行脱敏
+                let sanitizedData
+                try {
+                  const errorJson = JSON.parse(errorBuffer)
+                  sanitizedData = sanitizeUpstreamError(errorJson)
+                  logger.warn(
+                    `🧹 [Stream] [SANITIZED] CCR error (${response.status}): ${JSON.stringify(sanitizedData)}`
+                  )
+                  responseStream.write(JSON.stringify(sanitizedData))
+                } catch (e) {
+                  // 非JSON格式，作为纯文本脱敏
+                  sanitizedData = sanitizeErrorMessage(errorBuffer)
+                  logger.warn(
+                    `🧹 [Stream] [SANITIZED] CCR error (${response.status}): ${sanitizedData.substring(0, 100)}`
+                  )
+                  responseStream.write(sanitizedData)
+                }
                 responseStream.end()
               }
               resolve() // 不抛出异常，正常完成流处理

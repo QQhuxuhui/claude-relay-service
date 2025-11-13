@@ -3,7 +3,6 @@ const { v4: uuidv4 } = require('uuid')
 const claudeConsoleAccountService = require('./claudeConsoleAccountService')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
-const config = require('../../config/config')
 const {
   sanitizeUpstreamError,
   sanitizeErrorMessage,
@@ -161,7 +160,7 @@ class ClaudeConsoleRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, requestBody),
         signal: abortController.signal,
         validateStatus: () => true // 接受所有状态码
       }
@@ -317,15 +316,33 @@ class ClaudeConsoleRelayService {
         accountId
       }
     } catch (error) {
-      // 处理特定错误
+      // 处理特定错误 - 区分客户端断开和超时
       if (
         error.name === 'AbortError' ||
         error.name === 'CanceledError' ||
         error.code === 'ECONNABORTED' ||
         error.code === 'ERR_CANCELED'
       ) {
-        logger.info('Request aborted due to client disconnect')
-        throw new Error('Client disconnected')
+        // 检查是否是客户端主动断开还是超时
+        const wasClientDisconnect = abortController && abortController.signal.aborted
+        const bodySize = requestBody ? Buffer.byteLength(JSON.stringify(requestBody), 'utf8') : 0
+
+        if (wasClientDisconnect) {
+          logger.info(
+            `🔌 Request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
+          )
+          throw new Error('Client disconnected')
+        } else if (error.code === 'ECONNABORTED' && error.message?.includes('timeout')) {
+          logger.warn(`⏱️ Upstream request timeout for Claude Console account ${accountId}`, {
+            timeout: timeoutManager.getSmartTimeout(account, requestBody),
+            bodySize: `${(bodySize / 1024).toFixed(2)}KB`,
+            errorMessage: error.message
+          })
+          throw new Error('Upstream timeout')
+        } else {
+          logger.info('Request aborted due to client disconnect (fallback detection)')
+          throw new Error('Client disconnected')
+        }
       }
 
       logger.error(
@@ -548,7 +565,7 @@ class ClaudeConsoleRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, body),
         responseType: 'stream',
         validateStatus: () => true // 接受所有状态码
       }
@@ -929,6 +946,49 @@ class ClaudeConsoleRelayService {
             return
           }
 
+          // 区分客户端断开和超时错误
+          if (
+            error.name === 'AbortError' ||
+            error.name === 'CanceledError' ||
+            error.code === 'ECONNABORTED' ||
+            error.code === 'ERR_CANCELED'
+          ) {
+            const wasClientDisconnect = aborted // 使用 aborted 标志判断客户端断开
+            const bodySize = body ? Buffer.byteLength(JSON.stringify(body), 'utf8') : 0
+
+            if (wasClientDisconnect) {
+              logger.info(
+                `🔌 Stream request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
+              )
+            } else if (error.code === 'ECONNABORTED' && error.message?.includes('timeout')) {
+              logger.warn(
+                `⏱️ Upstream stream request timeout for Claude Console account ${accountId}`,
+                {
+                  timeout: timeoutManager.getSmartTimeout(account, body),
+                  bodySize: `${(bodySize / 1024).toFixed(2)}KB`,
+                  errorMessage: error.message
+                }
+              )
+            } else {
+              logger.info('Stream request aborted (fallback detection)')
+            }
+
+            if (!responseStream.destroyed) {
+              responseStream.write('event: error\n')
+              responseStream.write(
+                `data: ${JSON.stringify({
+                  error: wasClientDisconnect ? 'Client disconnected' : 'Request timeout',
+                  code: error.code,
+                  timestamp: new Date().toISOString()
+                })}\n\n`
+              )
+              responseStream.end()
+            }
+
+            reject(error)
+            return
+          }
+
           logger.error(
             `❌ Claude Console stream request error (Account: ${account?.name || accountId}):`,
             error.message
@@ -959,10 +1019,16 @@ class ClaudeConsoleRelayService {
           }
 
           if (!responseStream.destroyed) {
+            // 对错误信息进行脱敏
+            const sanitizedMessage = sanitizeErrorMessage(error.message || 'Unknown error')
+            logger.warn(
+              `🧹 [Stream] [SANITIZED] Claude Console error: ${sanitizedMessage.substring(0, 100)}`
+            )
+
             responseStream.write('event: error\n')
             responseStream.write(
               `data: ${JSON.stringify({
-                error: error.message,
+                error: sanitizedMessage,
                 code: error.code,
                 timestamp: new Date().toISOString()
               })}\n\n`

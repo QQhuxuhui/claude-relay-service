@@ -4,6 +4,7 @@ const { authenticateApiKey } = require('../middleware/auth')
 const droidRelayService = require('../services/droidRelayService')
 const sessionHelper = require('../utils/sessionHelper')
 const logger = require('../utils/logger')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 const router = express.Router()
 
@@ -53,9 +54,11 @@ router.post('/claude/v1/messages', authenticateApiKey, async (req, res) => {
     res.status(result.statusCode).set(result.headers).send(result.body)
   } catch (error) {
     logger.error('Droid Claude relay error:', error)
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(`🧹 [SANITIZED] Droid Claude relay error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: 'internal_server_error',
-      message: error.message
+      message: sanitizedMessage
     })
   }
 })
@@ -100,9 +103,11 @@ router.post(['/openai/v1/responses', '/openai/responses'], authenticateApiKey, a
     res.status(result.statusCode).set(result.headers).send(result.body)
   } catch (error) {
     logger.error('Droid OpenAI relay error:', error)
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(`🧹 [SANITIZED] Droid OpenAI relay error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: 'internal_server_error',
-      message: error.message
+      message: sanitizedMessage
     })
   }
 })
@@ -138,9 +143,11 @@ router.get('/*/v1/models', authenticateApiKey, async (req, res) => {
     })
   } catch (error) {
     logger.error('Droid models list error:', error)
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(`🧹 [SANITIZED] Droid models list error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: 'internal_server_error',
-      message: error.message
+      message: sanitizedMessage
     })
   }
 })

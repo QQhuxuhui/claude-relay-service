@@ -6,6 +6,7 @@ const geminiAccountService = require('../services/geminiAccountService')
 const unifiedGeminiScheduler = require('../services/unifiedGeminiScheduler')
 const { getAvailableModels } = require('../services/geminiRelayService')
 const crypto = require('crypto')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // 生成会话哈希
 function generateSessionHash(req) {
@@ -481,11 +482,15 @@ router.post('/v1/chat/completions', authenticateApiKey, async (req, res) => {
             }
           }
         } catch (error) {
+          const sanitizedMessage = sanitizeErrorMessage(error.message || 'Stream error')
           logger.error('Stream processing error:', error)
+          logger.warn(
+            `🧹 [SANITIZED] Stream processing error: ${sanitizedMessage.substring(0, 100)}`
+          )
           if (!res.headersSent) {
             res.status(500).json({
               error: {
-                message: error.message || 'Stream error',
+                message: sanitizedMessage,
                 type: 'api_error'
               }
             })
@@ -524,17 +529,19 @@ router.post('/v1/chat/completions', authenticateApiKey, async (req, res) => {
       })
 
       streamResponse.on('error', (error) => {
+        const sanitizedMessage = sanitizeErrorMessage(error.message || 'Stream error')
         logger.error('Stream error:', error)
+        logger.warn(`🧹 [SANITIZED] Stream error: ${sanitizedMessage.substring(0, 100)}`)
         if (!res.headersSent) {
           res.status(500).json({
             error: {
-              message: error.message || 'Stream error',
+              message: sanitizedMessage,
               type: 'api_error'
             }
           })
         } else {
           // 如果已经开始发送流数据，发送错误事件
-          res.write(`data: {"error": {"message": "${error.message || 'Stream error'}"}}\n\n`)
+          res.write(`data: {"error": {"message": "${sanitizedMessage}"}}\n\n`)
           res.write('data: [DONE]\n\n')
           res.end()
         }
@@ -597,11 +604,17 @@ router.post('/v1/chat/completions', authenticateApiKey, async (req, res) => {
 
     // 返回 OpenAI 格式的错误响应
     const status = error.status || 500
+    const rawMessage = error.error?.message || error.message || 'Internal server error'
+    const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+    logger.warn(
+      `🧹 [SANITIZED] OpenAI-Gemini error (${status}): ${sanitizedMessage.substring(0, 100)}`
+    )
+
     const errorResponse = {
-      error: error.error || {
-        message: error.message || 'Internal server error',
-        type: 'server_error',
-        code: 'internal_error'
+      error: {
+        message: sanitizedMessage,
+        type: error.error?.type || 'server_error',
+        code: error.error?.code || 'internal_error'
       }
     }
 
@@ -671,7 +684,9 @@ router.get('/v1/models', authenticateApiKey, async (req, res) => {
       data: models
     })
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('Failed to get OpenAI-Gemini models:', error)
+    logger.warn(`🧹 [SANITIZED] Get models error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to retrieve models',
@@ -724,7 +739,9 @@ router.get('/v1/models/:model', authenticateApiKey, async (req, res) => {
       parent: null
     })
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('Failed to get model details:', error)
+    logger.warn(`🧹 [SANITIZED] Get model details error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to retrieve model details',

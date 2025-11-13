@@ -15,6 +15,7 @@ const claudeCodeHeadersService = require('../services/claudeCodeHeadersService')
 const sessionHelper = require('../utils/sessionHelper')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
 const pricingService = require('../services/pricingService')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // 🔧 辅助函数：检查 API Key 权限
 function checkPermissions(apiKeyData, requiredPermission = 'claude') {
@@ -85,7 +86,9 @@ router.get('/v1/models', authenticateApiKey, async (req, res) => {
       data: models
     })
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('❌ Failed to get OpenAI-Claude models:', error)
+    logger.warn(`🧹 [SANITIZED] Get models error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to retrieve models',
@@ -159,7 +162,9 @@ router.get('/v1/models/:model', authenticateApiKey, async (req, res) => {
 
     res.json(modelInfo)
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('❌ Failed to get model details:', error)
+    logger.warn(`🧹 [SANITIZED] Get model details error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to retrieve model details',
@@ -335,7 +340,9 @@ async function handleChatCompletion(req, res, apiKeyData) {
       try {
         claudeData = JSON.parse(claudeResponse.body)
       } catch (error) {
+        const sanitizedMessage = sanitizeErrorMessage(error.message || 'Parse error')
         logger.error('❌ Failed to parse Claude response:', error)
+        logger.warn(`🧹 [SANITIZED] Parse error: ${sanitizedMessage.substring(0, 100)}`)
         return res.status(502).json({
           error: {
             message: 'Invalid response from Claude API',
@@ -347,9 +354,14 @@ async function handleChatCompletion(req, res, apiKeyData) {
 
       // 处理错误响应
       if (claudeResponse.statusCode >= 400) {
+        const rawMessage = claudeData.error?.message || 'Claude API error'
+        const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+        logger.warn(
+          `🧹 [SANITIZED] Claude error response (${claudeResponse.statusCode}): ${sanitizedMessage.substring(0, 100)}`
+        )
         return res.status(claudeResponse.statusCode).json({
           error: {
-            message: claudeData.error?.message || 'Claude API error',
+            message: sanitizedMessage,
             type: claudeData.error?.type || 'api_error',
             code: claudeData.error?.code || 'unknown_error'
           }
@@ -403,9 +415,13 @@ async function handleChatCompletion(req, res, apiKeyData) {
     logger.error('❌ OpenAI-Claude request error:', error)
 
     const status = error.status || 500
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] OpenAI-Claude error (${status}): ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(status).json({
       error: {
-        message: error.message || 'Internal server error',
+        message: sanitizedMessage,
         type: 'server_error',
         code: 'internal_error'
       }
@@ -465,7 +481,9 @@ router.post('/v1/completions', authenticateApiKey, async (req, res) => {
     // 使用共享的处理函数
     await handleChatCompletion(req, res, apiKeyData)
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('❌ OpenAI completions error:', error)
+    logger.warn(`🧹 [SANITIZED] Completions error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to process completion request',

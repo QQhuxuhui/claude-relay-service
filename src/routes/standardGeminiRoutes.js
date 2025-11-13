@@ -6,6 +6,7 @@ const geminiAccountService = require('../services/geminiAccountService')
 const unifiedGeminiScheduler = require('../services/unifiedGeminiScheduler')
 const apiKeyService = require('../services/apiKeyService')
 const sessionHelper = require('../utils/sessionHelper')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // 导入 geminiRoutes 中导出的处理函数
 const { handleLoadCodeAssist, handleOnboardUser, handleCountTokens } = require('./geminiRoutes')
@@ -326,6 +327,7 @@ async function handleStandardGenerateContent(req, res) {
       res.json(response)
     }
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error(`Error in standard generateContent endpoint`, {
       message: error.message,
       status: error.response?.status,
@@ -333,9 +335,12 @@ async function handleStandardGenerateContent(req, res) {
       responseData: error.response?.data,
       stack: error.stack
     })
+    logger.warn(
+      `🧹 [SANITIZED] Standard generateContent error: ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(500).json({
       error: {
-        message: error.message || 'Internal server error',
+        message: sanitizedMessage,
         type: 'api_error'
       }
     })
@@ -623,11 +628,13 @@ async function handleStandardStreamGenerateContent(req, res) {
     })
 
     streamResponse.on('error', (error) => {
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'Stream error')
       logger.error('Stream error:', error)
+      logger.warn(`🧹 [SANITIZED] Standard stream error: ${sanitizedMessage.substring(0, 100)}`)
       if (!res.headersSent) {
         res.status(500).json({
           error: {
-            message: error.message || 'Stream error',
+            message: sanitizedMessage,
             type: 'api_error'
           }
         })
@@ -637,6 +644,7 @@ async function handleStandardStreamGenerateContent(req, res) {
     })
   } catch (error) {
     const normalizedError = await normalizeAxiosStreamError(error)
+    const sanitizedMessage = sanitizeErrorMessage(normalizedError.message)
 
     logger.error(`Error in standard streamGenerateContent endpoint`, {
       message: error.message,
@@ -645,26 +653,17 @@ async function handleStandardStreamGenerateContent(req, res) {
       responseData: normalizedError.parsedBody || normalizedError.rawBody,
       stack: error.stack
     })
+    logger.warn(
+      `🧹 [SANITIZED] Standard streamGenerateContent error (${normalizedError.status || 500}): ${sanitizedMessage.substring(0, 100)}`
+    )
 
     if (!res.headersSent) {
       const statusCode = normalizedError.status || 500
       const responseBody = {
         error: {
-          message: normalizedError.message,
+          message: sanitizedMessage,
           type: 'api_error'
         }
-      }
-
-      if (normalizedError.status) {
-        responseBody.error.upstreamStatus = normalizedError.status
-      }
-      if (normalizedError.statusText) {
-        responseBody.error.upstreamStatusText = normalizedError.statusText
-      }
-      if (normalizedError.parsedBody && typeof normalizedError.parsedBody === 'object') {
-        responseBody.error.upstreamResponse = normalizedError.parsedBody
-      } else if (normalizedError.rawBody) {
-        responseBody.error.upstreamRaw = normalizedError.rawBody
       }
 
       return res.status(statusCode).json(responseBody)
@@ -824,7 +823,9 @@ router.get(
         res.status(500).json({ error: 'Models handler not found' })
       }
     } catch (error) {
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
       logger.error('Error in standard models endpoint:', error)
+      logger.warn(`🧹 [SANITIZED] Standard models error: ${sanitizedMessage.substring(0, 100)}`)
       res.status(500).json({
         error: {
           message: 'Failed to retrieve models',
@@ -849,7 +850,9 @@ router.get('/v1/models', authenticateApiKey, ensureGeminiPermissionMiddleware, a
       res.status(500).json({ error: 'Models handler not found' })
     }
   } catch (error) {
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
     logger.error('Error in standard models endpoint (v1):', error)
+    logger.warn(`🧹 [SANITIZED] Standard models (v1) error: ${sanitizedMessage.substring(0, 100)}`)
     res.status(500).json({
       error: {
         message: 'Failed to retrieve models',

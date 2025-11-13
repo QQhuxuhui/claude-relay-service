@@ -6,6 +6,7 @@ const {
 const { fromEnv } = require('@aws-sdk/credential-providers')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 class BedrockRelayService {
   constructor() {
@@ -406,25 +407,34 @@ class BedrockRelayService {
 
   // 处理Bedrock错误
   _handleBedrockError(error) {
-    const errorMessage = error.message || 'Unknown Bedrock error'
+    const rawMessage = error.message || 'Unknown Bedrock error'
+    // 对错误信息进行脱敏
+    const sanitizedMessage = sanitizeErrorMessage(rawMessage)
 
     if (error.name === 'ValidationException') {
-      return new Error(`Bedrock参数验证失败: ${errorMessage}`)
+      const errorMsg = `Bedrock参数验证失败: ${sanitizedMessage}`
+      logger.warn(`🧹 [SANITIZED] Bedrock error: ${errorMsg.substring(0, 100)}`)
+      return new Error(errorMsg)
     }
 
     if (error.name === 'ThrottlingException') {
+      logger.warn('🧹 [SANITIZED] Bedrock throttling error')
       return new Error('Bedrock请求限流，请稍后重试')
     }
 
     if (error.name === 'AccessDeniedException') {
+      logger.warn('🧹 [SANITIZED] Bedrock access denied error')
       return new Error('Bedrock访问被拒绝，请检查IAM权限')
     }
 
     if (error.name === 'ModelNotReadyException') {
+      logger.warn('🧹 [SANITIZED] Bedrock model not ready error')
       return new Error('Bedrock模型未就绪，请稍后重试')
     }
 
-    return new Error(`Bedrock服务错误: ${errorMessage}`)
+    const errorMsg = `Bedrock服务错误: ${sanitizedMessage}`
+    logger.warn(`🧹 [SANITIZED] Bedrock error: ${errorMsg.substring(0, 100)}`)
+    return new Error(errorMsg)
   }
 
   // 获取可用模型列表

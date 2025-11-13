@@ -9,6 +9,7 @@ const sessionHelper = require('../utils/sessionHelper')
 const unifiedGeminiScheduler = require('../services/unifiedGeminiScheduler')
 const apiKeyService = require('../services/apiKeyService')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 // const { OAuth2Client } = require('google-auth-library'); // OAuth2Client is not used in this file
 
 // 生成会话哈希
@@ -124,9 +125,13 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
       accountId = selectedAccountId
     } catch (error) {
       logger.error('Failed to select Gemini account:', error)
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'No available Gemini accounts')
+      logger.warn(
+        `🧹 [SANITIZED] Gemini account selection error: ${sanitizedMessage.substring(0, 100)}`
+      )
       return res.status(503).json({
         error: {
-          message: error.message || 'No available Gemini accounts',
+          message: sanitizedMessage,
           type: 'service_unavailable'
         }
       })
@@ -207,12 +212,18 @@ router.post('/messages', authenticateApiKey, async (req, res) => {
       }
     }
 
-    // 返回错误响应
+    // 返回错误响应，进行脱敏处理
     const status = error.status || 500
+    const rawMessage = error.error?.message || error.message || 'Internal server error'
+    const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+    logger.warn(
+      `🧹 [SANITIZED] Gemini request error (${status}): ${sanitizedMessage.substring(0, 100)}`
+    )
+
     const errorResponse = {
-      error: error.error || {
-        message: error.message || 'Internal server error',
-        type: 'api_error'
+      error: {
+        message: sanitizedMessage,
+        type: error.error?.type || 'api_error'
       }
     }
 
@@ -425,9 +436,13 @@ async function handleLoadCodeAssist(req, res) {
   } catch (error) {
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.error(`Error in loadCodeAssist endpoint (${version})`, { error: error.message })
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] loadCodeAssist error (${version}): ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(500).json({
       error: 'Internal server error',
-      message: error.message
+      message: sanitizedMessage
     })
   }
 }
@@ -516,9 +531,13 @@ async function handleOnboardUser(req, res) {
   } catch (error) {
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.error(`Error in onboardUser endpoint (${version})`, { error: error.message })
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] onboardUser error (${version}): ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(500).json({
       error: 'Internal server error',
-      message: error.message
+      message: sanitizedMessage
     })
   }
 }
@@ -580,9 +599,13 @@ async function handleCountTokens(req, res) {
   } catch (error) {
     const version = req.path.includes('v1beta') ? 'v1beta' : 'v1internal'
     logger.error(`Error in countTokens endpoint (${version})`, { error: error.message })
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] countTokens error (${version}): ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(500).json({
       error: {
-        message: error.message || 'Internal server error',
+        message: sanitizedMessage,
         type: 'api_error'
       }
     })
@@ -732,9 +755,13 @@ async function handleGenerateContent(req, res) {
       requestMethod: error.config?.method,
       stack: error.stack
     })
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] generateContent error (${version}): ${sanitizedMessage.substring(0, 100)}`
+    )
     res.status(500).json({
       error: {
-        message: error.message || 'Internal server error',
+        message: sanitizedMessage,
         type: 'api_error'
       }
     })
@@ -992,10 +1019,12 @@ async function handleStreamGenerateContent(req, res) {
 
     streamResponse.on('error', (error) => {
       logger.error('Stream error:', error)
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'Stream error')
+      logger.warn(`🧹 [SANITIZED] Stream error: ${sanitizedMessage.substring(0, 100)}`)
       if (!res.headersSent) {
         res.status(500).json({
           error: {
-            message: error.message || 'Stream error',
+            message: sanitizedMessage,
             type: 'api_error'
           }
         })
@@ -1016,10 +1045,14 @@ async function handleStreamGenerateContent(req, res) {
       stack: error.stack
     })
 
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+    logger.warn(
+      `🧹 [SANITIZED] streamGenerateContent error (${version}): ${sanitizedMessage.substring(0, 100)}`
+    )
     if (!res.headersSent) {
       res.status(500).json({
         error: {
-          message: error.message || 'Internal server error',
+          message: sanitizedMessage,
           type: 'api_error'
         }
       })

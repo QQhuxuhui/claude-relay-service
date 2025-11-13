@@ -36,18 +36,8 @@
           </template>
         </LogoTitle>
       </div>
-      <!-- 主题切换和用户菜单 -->
+      <!-- 用户菜单 -->
       <div class="flex items-center gap-2 sm:gap-4">
-        <!-- 主题切换按钮 -->
-        <div class="flex items-center">
-          <ThemeToggle mode="dropdown" />
-        </div>
-
-        <!-- 分隔线 -->
-        <div
-          class="h-8 w-px bg-gradient-to-b from-transparent via-gray-300 to-transparent opacity-50 dark:via-gray-600"
-        />
-
         <!-- 用户菜单 -->
         <div class="user-menu-container relative">
           <button
@@ -272,7 +262,6 @@ import { useAuthStore } from '@/stores/auth'
 import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
 import LogoTitle from '@/components/common/LogoTitle.vue'
-import ThemeToggle from '@/components/common/ThemeToggle.vue'
 
 const router = useRouter()
 const authStore = useAuthStore()
