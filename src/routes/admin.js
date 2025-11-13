@@ -1847,6 +1847,14 @@ router.get('/account-groups/:groupId/members', authenticateAdmin, async (req, re
         case 'openai':
           account = await openaiAccountService.getAccount(memberId)
           break
+        case 'bedrock': {
+          const bedrockResult = await bedrockAccountService.getAccount(memberId)
+          account = bedrockResult.success ? bedrockResult.data : null
+          break
+        }
+        case 'azure_openai':
+          account = await azureOpenaiAccountService.getAccount(memberId)
+          break
         case 'claude':
         default:
           account = await claudeAccountService.getAccount(memberId)
@@ -1868,6 +1876,13 @@ router.get('/account-groups/:groupId/members', authenticateAdmin, async (req, re
       }
       if (!account) {
         account = await openaiAccountService.getAccount(memberId)
+      }
+      if (!account) {
+        const bedrockResult = await bedrockAccountService.getAccount(memberId)
+        account = bedrockResult.success ? bedrockResult.data : null
+      }
+      if (!account) {
+        account = await azureOpenaiAccountService.getAccount(memberId)
       }
       if (!account && group.platform !== 'droid') {
         account = await droidAccountService.getAccount(memberId)
@@ -3656,7 +3671,9 @@ router.post('/bedrock-accounts', authenticateAdmin, async (req, res) => {
       defaultModel,
       priority,
       accountType,
-      credentialType
+      credentialType,
+      groupId,
+      groupIds
     } = req.body
 
     if (!name) {
@@ -3669,16 +3686,22 @@ router.post('/bedrock-accounts', authenticateAdmin, async (req, res) => {
     }
 
     // 验证accountType的有效性
-    if (accountType && !['shared', 'dedicated'].includes(accountType)) {
+    if (accountType && !['shared', 'dedicated', 'group'].includes(accountType)) {
       return res
         .status(400)
-        .json({ error: 'Invalid account type. Must be "shared" or "dedicated"' })
+        .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
     }
 
     // 验证credentialType的有效性
     if (credentialType && !['default', 'access_key', 'bearer_token'].includes(credentialType)) {
       return res.status(400).json({
         error: 'Invalid credential type. Must be "default", "access_key", or "bearer_token"'
+      })
+    }
+
+    if (accountType === 'group' && !groupId && (!groupIds || groupIds.length === 0)) {
+      return res.status(400).json({
+        error: 'Group ID or Group IDs are required for group type accounts'
       })
     }
 
@@ -3697,6 +3720,17 @@ router.post('/bedrock-accounts', authenticateAdmin, async (req, res) => {
       return res
         .status(500)
         .json({ error: 'Failed to create Bedrock account', message: result.error })
+    }
+
+    // 如果是分组类型，将账户添加到分组
+    if (accountType === 'group') {
+      if (groupIds && groupIds.length > 0) {
+        // 使用多分组设置
+        await accountGroupService.setAccountGroups(result.data.id, groupIds, 'bedrock')
+      } else if (groupId) {
+        // 兼容单分组模式
+        await accountGroupService.addAccountToGroup(result.data.id, groupId, 'bedrock')
+      }
     }
 
     logger.success(`☁️ Admin created Bedrock account: ${name}`)
@@ -3728,10 +3762,54 @@ router.put('/bedrock-accounts/:accountId', authenticateAdmin, async (req, res) =
     }
 
     // 验证accountType的有效性
-    if (mappedUpdates.accountType && !['shared', 'dedicated'].includes(mappedUpdates.accountType)) {
+    if (
+      mappedUpdates.accountType &&
+      !['shared', 'dedicated', 'group'].includes(mappedUpdates.accountType)
+    ) {
       return res
         .status(400)
-        .json({ error: 'Invalid account type. Must be "shared" or "dedicated"' })
+        .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
+    }
+
+    // 获取账户当前信息以处理分组变更
+    const currentAccountResult = await bedrockAccountService.getAccount(accountId)
+    if (!currentAccountResult.success) {
+      return res.status(404).json({ error: currentAccountResult.error || 'Account not found' })
+    }
+    const currentAccount = currentAccountResult.data
+
+    if (
+      mappedUpdates.accountType === 'group' &&
+      !mappedUpdates.groupId &&
+      (!mappedUpdates.groupIds || mappedUpdates.groupIds.length === 0)
+    ) {
+      return res.status(400).json({
+        error: 'Group ID or Group IDs are required for group type accounts'
+      })
+    }
+
+    // 处理分组的变更
+    if (mappedUpdates.accountType !== undefined) {
+      // 如果之前是分组类型，需要从所有分组中移除
+      if (currentAccount.accountType === 'group') {
+        await accountGroupService.removeAccountFromAllGroups(accountId)
+      }
+      // 如果新类型是分组，处理多分组支持
+      if (mappedUpdates.accountType === 'group') {
+        if (Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')) {
+          // 如果明确提供了 groupIds 参数（包括空数组）
+          if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(accountId, mappedUpdates.groupIds, 'bedrock')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(accountId)
+          }
+        } else if (mappedUpdates.groupId) {
+          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+          await accountGroupService.addAccountToGroup(accountId, mappedUpdates.groupId, 'bedrock')
+        }
+      }
     }
 
     // 验证credentialType的有效性
@@ -3769,6 +3847,19 @@ router.delete('/bedrock-accounts/:accountId', authenticateAdmin, async (req, res
 
     // 自动解绑所有绑定的 API Keys
     const unboundCount = await apiKeyService.unbindAccountFromAllKeys(accountId, 'bedrock')
+
+    // 获取账户信息以检查是否在分组中
+    const accountResult = await bedrockAccountService.getAccount(accountId)
+    if (!accountResult.success) {
+      return res.status(404).json({ error: accountResult.error || 'Account not found' })
+    }
+    const account = accountResult.data
+    if (account.accountType === 'group') {
+      const groups = await accountGroupService.getAccountGroups(accountId)
+      for (const group of groups) {
+        await accountGroupService.removeAccountFromGroup(accountId, group.id)
+      }
+    }
 
     const result = await bedrockAccountService.deleteAccount(accountId)
 
@@ -8155,6 +8246,36 @@ router.put('/azure-openai-accounts/:id', authenticateAdmin, async (req, res) => 
     // ✅ 【新增】映射字段名：前端的 expiresAt -> 后端的 subscriptionExpiresAt
     const mappedUpdates = mapExpiryField(updates, 'Azure OpenAI', id)
 
+    // 获取账户当前信息以处理分组变更
+    const currentAccount = await azureOpenaiAccountService.getAccount(id)
+    if (!currentAccount) {
+      return res.status(404).json({ error: 'Account not found' })
+    }
+
+    // 处理分组的变更
+    if (mappedUpdates.accountType !== undefined) {
+      // 如果之前是分组类型，需要从所有分组中移除
+      if (currentAccount.accountType === 'group') {
+        await accountGroupService.removeAccountFromAllGroups(id)
+      }
+      // 如果新类型是分组，处理多分组支持
+      if (mappedUpdates.accountType === 'group') {
+        if (Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')) {
+          // 如果明确提供了 groupIds 参数（包括空数组）
+          if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(id, mappedUpdates.groupIds, 'azure_openai')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(id)
+          }
+        } else if (mappedUpdates.groupId) {
+          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+          await accountGroupService.addAccountToGroup(id, mappedUpdates.groupId, 'azure_openai')
+        }
+      }
+    }
+
     const account = await azureOpenaiAccountService.updateAccount(id, mappedUpdates)
 
     res.json({
@@ -8179,6 +8300,15 @@ router.delete('/azure-openai-accounts/:id', authenticateAdmin, async (req, res) 
 
     // 自动解绑所有绑定的 API Keys
     const unboundCount = await apiKeyService.unbindAccountFromAllKeys(id, 'azure_openai')
+
+    // 获取账户信息以检查是否在分组中
+    const account = await azureOpenaiAccountService.getAccount(id)
+    if (account && account.accountType === 'group') {
+      const groups = await accountGroupService.getAccountGroups(id)
+      for (const group of groups) {
+        await accountGroupService.removeAccountFromGroup(id, group.id)
+      }
+    }
 
     await azureOpenaiAccountService.deleteAccount(id)
 

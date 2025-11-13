@@ -27,8 +27,9 @@ class AccountGroupService {
       }
 
       // 验证平台类型
-      if (!['claude', 'gemini', 'openai', 'droid'].includes(platform)) {
-        throw new Error('平台类型必须是 claude、gemini、openai 或 droid')
+      const validPlatforms = ['claude', 'gemini', 'openai', 'droid', 'bedrock', 'azure_openai']
+      if (!validPlatforms.includes(platform)) {
+        throw new Error(`平台类型必须是以下之一: ${validPlatforms.join('、')}`)
       }
 
       const client = redis.getClientSafe()
@@ -312,7 +313,9 @@ class AccountGroupService {
           (keyData.claudeAccountId === groupKey ||
             keyData.geminiAccountId === groupKey ||
             keyData.openaiAccountId === groupKey ||
-            keyData.droidAccountId === groupKey)
+            keyData.droidAccountId === groupKey ||
+            keyData.bedrockAccountId === groupKey ||
+            keyData.azureOpenaiAccountId === groupKey)
         ) {
           boundApiKeys.push({
             id: keyId,
