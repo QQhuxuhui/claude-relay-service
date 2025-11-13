@@ -12,17 +12,21 @@ const ACCOUNT_TYPE_CONFIG = {
   'openai-responses': { prefix: 'openai_responses_account:' },
   'azure-openai': { prefix: 'azure_openai:account:' },
   gemini: { prefix: 'gemini_account:' },
-  droid: { prefix: 'droid:account:' }
+  droid: { prefix: 'droid:account:' },
+  bedrock: { prefix: 'bedrock_account:' },
+  ccr: { prefix: 'ccr_account:' }
 }
 
 const ACCOUNT_TYPE_PRIORITY = [
   'openai',
   'openai-responses',
   'azure-openai',
+  'bedrock',
   'claude',
   'claude-console',
   'gemini',
-  'droid'
+  'droid',
+  'ccr'
 ]
 
 const ACCOUNT_CATEGORY_MAP = {
@@ -32,7 +36,9 @@ const ACCOUNT_CATEGORY_MAP = {
   'openai-responses': 'openai',
   'azure-openai': 'openai',
   gemini: 'gemini',
-  droid: 'droid'
+  droid: 'droid',
+  bedrock: 'bedrock',
+  ccr: 'ccr'
 }
 
 function normalizeAccountTypeKey(type) {
@@ -896,24 +902,14 @@ class ApiKeyService {
     try {
       const client = redis.getClientSafe()
 
-      // 账户类型与Redis key前缀的映射
-      const typeMap = {
-        claude_account: 'claude',
-        claude_console_account: 'claude-console',
-        gemini_account: 'gemini',
-        openai_account: 'openai',
-        openai_responses_account: 'openai-responses',
-        bedrock_account: 'bedrock',
-        azure_openai_account: 'azure-openai',
-        droid_account: 'droid',
-        ccr_account: 'ccr'
-      }
+      for (const [type, typeConfig] of Object.entries(ACCOUNT_TYPE_CONFIG)) {
+        if (!typeConfig?.prefix) {
+          continue
+        }
 
-      // 尝试每种账户类型
-      for (const [keyPrefix, accountType] of Object.entries(typeMap)) {
-        const exists = await client.exists(`${keyPrefix}:${accountId}`)
+        const exists = await client.exists(`${typeConfig.prefix}${accountId}`)
         if (exists) {
-          return accountType
+          return type
         }
       }
 
@@ -1168,6 +1164,26 @@ class ApiKeyService {
         }
       }
 
+      const baseCost = typeof costInfo.totalCost === 'number' ? costInfo.totalCost : 0
+      let finalCost = baseCost
+      let rateMultiplier = 1.0
+      let resolvedAccountType = normalizeAccountTypeKey(accountType)
+
+      if (!resolvedAccountType || resolvedAccountType === 'unknown') {
+        resolvedAccountType = accountId ? await this.getAccountType(accountId) : 'unknown'
+      }
+
+      if (finalCost > 0 && resolvedAccountType && resolvedAccountType !== 'unknown') {
+        try {
+          rateMultiplier = await rateMultiplierService.getMultiplier(resolvedAccountType)
+          finalCost = baseCost * rateMultiplier
+        } catch (error) {
+          logger.error('❌ Failed to apply rate multiplier, using base cost:', error)
+          finalCost = baseCost
+          rateMultiplier = 1.0
+        }
+      }
+
       // 提取详细的缓存创建数据
       let ephemeral5mTokens = 0
       let ephemeral1hTokens = 0
@@ -1191,15 +1207,16 @@ class ApiKeyService {
         costInfo.isLongContextRequest || false // 传递 1M 上下文请求标记
       )
 
-      // 记录费用统计
-      if (costInfo.totalCost > 0) {
-        await redis.incrementDailyCost(keyId, costInfo.totalCost)
+      // 记录费用统计（应用倍率后）
+      if (finalCost > 0) {
+        await redis.incrementDailyCost(keyId, finalCost)
         logger.database(
-          `💰 Recorded cost for ${keyId}: $${costInfo.totalCost.toFixed(6)}, model: ${model}`
+          `💰 Recorded cost for ${keyId}: $${finalCost.toFixed(6)} ` +
+            `(base: $${baseCost.toFixed(6)}, multiplier: ${rateMultiplier}x, account type: ${resolvedAccountType}, model: ${model})`
         )
 
         // 记录 Opus 周费用（如果适用）
-        await this.recordOpusCost(keyId, costInfo.totalCost, model, accountType)
+        await this.recordOpusCost(keyId, finalCost, model, resolvedAccountType)
 
         // 记录详细的缓存费用（如果有）
         if (costInfo.ephemeral5mCost > 0 || costInfo.ephemeral1hCost > 0) {
@@ -1254,7 +1271,7 @@ class ApiKeyService {
         timestamp: new Date().toISOString(),
         model,
         accountId: accountId || null,
-        accountType: accountType || null,
+        accountType: resolvedAccountType || null,
         inputTokens,
         outputTokens,
         cacheCreateTokens,
@@ -1262,7 +1279,9 @@ class ApiKeyService {
         ephemeral5mTokens,
         ephemeral1hTokens,
         totalTokens,
-        cost: Number((costInfo.totalCost || 0).toFixed(6)),
+        cost: Number(finalCost.toFixed(6)),
+        rateMultiplier,
+        baseCost: Number(baseCost.toFixed(6)),
         costBreakdown: {
           input: costInfo.inputCost || 0,
           output: costInfo.outputCost || 0,

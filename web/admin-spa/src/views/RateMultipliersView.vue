@@ -275,7 +275,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useToast } from '@/composables/useToast'
-import axios from 'axios'
+import { apiClient } from '@/config/api'
 
 const { showToast } = useToast()
 
@@ -370,19 +370,16 @@ const changedPlatforms = computed(() => {
 const loadMultipliers = async () => {
   try {
     loading.value = true
-    const token = localStorage.getItem('admin_token')
-    const response = await axios.get('/admin/rate-multipliers', {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const response = await apiClient.get('/admin/rate-multipliers')
 
-    if (response.data.success) {
-      multipliers.value = { ...response.data.multipliers }
-      originalMultipliers.value = { ...response.data.multipliers }
+    if (response.success) {
+      multipliers.value = { ...response.multipliers }
+      originalMultipliers.value = { ...response.multipliers }
       showToast('配置加载成功', 'success')
     }
   } catch (error) {
     console.error('Failed to load multipliers:', error)
-    showToast(error.response?.data?.message || '加载配置失败', 'error')
+    showToast(error.response?.data?.message || error.message || '加载配置失败', 'error')
   } finally {
     loading.value = false
   }
@@ -416,7 +413,6 @@ const saveMultipliers = async () => {
 
   try {
     saving.value = true
-    const token = localStorage.getItem('admin_token')
 
     // 只发送修改过的倍率
     const updates = {}
@@ -424,18 +420,16 @@ const saveMultipliers = async () => {
       updates[p.key] = multipliers.value[p.key]
     })
 
-    const response = await axios.put('/admin/rate-multipliers', updates, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
+    const response = await apiClient.put('/admin/rate-multipliers', updates)
 
-    if (response.data.success) {
-      originalMultipliers.value = { ...response.data.multipliers }
-      multipliers.value = { ...response.data.multipliers }
+    if (response.success) {
+      originalMultipliers.value = { ...response.multipliers }
+      multipliers.value = { ...response.multipliers }
       showToast('配置保存成功', 'success')
     }
   } catch (error) {
     console.error('Failed to save multipliers:', error)
-    showToast(error.response?.data?.message || '保存配置失败', 'error')
+    showToast(error.response?.data?.message || error.message || '保存配置失败', 'error')
   } finally {
     saving.value = false
   }
@@ -452,23 +446,16 @@ const resetToDefaults = async () => {
 
   try {
     saving.value = true
-    const token = localStorage.getItem('admin_token')
-    const response = await axios.post(
-      '/admin/rate-multipliers/reset',
-      {},
-      {
-        headers: { Authorization: `Bearer ${token}` }
-      }
-    )
+    const response = await apiClient.post('/admin/rate-multipliers/reset', {})
 
-    if (response.data.success) {
-      originalMultipliers.value = { ...response.data.multipliers }
-      multipliers.value = { ...response.data.multipliers }
+    if (response.success) {
+      originalMultipliers.value = { ...response.multipliers }
+      multipliers.value = { ...response.multipliers }
       showToast('已重置为默认配置', 'success')
     }
   } catch (error) {
     console.error('Failed to reset multipliers:', error)
-    showToast(error.response?.data?.message || '重置配置失败', 'error')
+    showToast(error.response?.data?.message || error.message || '重置配置失败', 'error')
   } finally {
     saving.value = false
   }
