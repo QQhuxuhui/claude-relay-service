@@ -12,6 +12,7 @@ const apiKeyService = require('../services/apiKeyService')
 const crypto = require('crypto')
 const ProxyHelper = require('../utils/proxyHelper')
 const { updateRateLimitCounters } = require('../utils/rateLimitHelper')
+const { sanitizeErrorMessage, sanitizeUpstreamError } = require('../utils/errorSanitizer')
 
 // 创建代理 Agent（使用统一的代理工具）
 function createProxyAgent(proxy) {
@@ -931,13 +932,24 @@ const handleResponses = async (req, res) => {
 
     let responsePayload = error.response?.data
     if (!responsePayload) {
-      responsePayload = { error: { message: error.message || 'Internal server error' } }
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'Internal server error')
+      responsePayload = { error: { message: sanitizedMessage } }
+      logger.warn(`🧹 [SANITIZED] OpenAI error (no payload): ${sanitizedMessage.substring(0, 100)}`)
     } else if (typeof responsePayload === 'string') {
-      responsePayload = { error: { message: responsePayload } }
+      const sanitizedMessage = sanitizeErrorMessage(responsePayload)
+      responsePayload = { error: { message: sanitizedMessage } }
+      logger.warn(`🧹 [SANITIZED] OpenAI error (string): ${sanitizedMessage.substring(0, 100)}`)
     } else if (typeof responsePayload === 'object' && !responsePayload.error) {
-      responsePayload = {
-        error: { message: responsePayload.message || error.message || 'Internal server error' }
-      }
+      const rawMessage = responsePayload.message || error.message || 'Internal server error'
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      responsePayload = { error: { message: sanitizedMessage } }
+      logger.warn(`🧹 [SANITIZED] OpenAI error (object): ${sanitizedMessage.substring(0, 100)}`)
+    } else if (typeof responsePayload === 'object' && responsePayload.error) {
+      // 对象中已有error字段，需要脱敏error.message
+      responsePayload = sanitizeUpstreamError(responsePayload)
+      logger.warn(
+        `🧹 [SANITIZED] OpenAI error (upstream): ${JSON.stringify(responsePayload).substring(0, 100)}`
+      )
     }
 
     if (!res.headersSent) {

@@ -14,6 +14,7 @@ const ClaudeCodeValidator = require('../validators/clients/claudeCodeValidator')
 const { formatDateWithTimezone } = require('../utils/dateHelper')
 const runtimeAddon = require('../utils/runtimeAddon')
 const timeoutManager = require('../utils/timeoutManager')
+const { sanitizeErrorMessage, sanitizeUpstreamError } = require('../utils/errorSanitizer')
 
 const RUNTIME_EVENT_FMT_CLAUDE_REQ = 'fmtClaudeReq'
 
@@ -1509,13 +1510,28 @@ class ClaudeRelayService {
               })()
             }
             if (!responseStream.destroyed) {
+              // 对错误信息进行脱敏处理
+              let sanitizedDetails
+              if (typeof errorData === 'string') {
+                try {
+                  const parsed = JSON.parse(errorData)
+                  sanitizedDetails = sanitizeUpstreamError(parsed)
+                } catch (e) {
+                  sanitizedDetails = sanitizeErrorMessage(errorData)
+                }
+              } else {
+                sanitizedDetails = sanitizeUpstreamError(errorData)
+              }
+              logger.warn(
+                `🧹 [Stream] [SANITIZED] Claude API error (${res.statusCode}): ${JSON.stringify(sanitizedDetails).substring(0, 100)}`
+              )
               // 发送错误事件
               responseStream.write('event: error\n')
               responseStream.write(
                 `data: ${JSON.stringify({
                   error: 'Claude API error',
                   status: res.statusCode,
-                  details: errorData,
+                  details: sanitizedDetails,
                   timestamp: new Date().toISOString()
                 })}\n\n`
               )
@@ -1656,13 +1672,16 @@ class ClaudeRelayService {
             }
           } catch (error) {
             logger.error('❌ Error processing stream data:', error)
+            // 对错误信息进行脱敏处理
+            const sanitizedMessage = sanitizeErrorMessage(error.message || 'Unknown error')
+            logger.warn(`🧹 [Stream] [SANITIZED] Error: ${sanitizedMessage.substring(0, 100)}`)
             // 发送错误但不破坏流，让它自然结束
             if (!responseStream.destroyed) {
               responseStream.write('event: error\n')
               responseStream.write(
                 `data: ${JSON.stringify({
                   error: 'Stream processing error',
-                  message: error.message,
+                  message: sanitizedMessage,
                   timestamp: new Date().toISOString()
                 })}\n\n`
               )
@@ -2143,9 +2162,12 @@ class ClaudeRelayService {
       }
     } catch (error) {
       logger.error('❌ Health check failed:', error)
+      // 对错误信息进行脱敏处理
+      const sanitizedMessage = sanitizeErrorMessage(error.message || 'Health check failed')
+      logger.warn(`🧹 [SANITIZED] Health check error: ${sanitizedMessage.substring(0, 100)}`)
       return {
         healthy: false,
-        error: error.message,
+        error: sanitizedMessage,
         timestamp: new Date().toISOString()
       }
     }

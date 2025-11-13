@@ -6,6 +6,7 @@ const apiKeyService = require('./apiKeyService')
 const unifiedOpenAIScheduler = require('./unifiedOpenAIScheduler')
 const config = require('../../config/config')
 const crypto = require('crypto')
+const { sanitizeUpstreamError, sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // 抽取缓存写入 token，兼容多种字段命名
 function extractCacheCreationTokens(usageData) {
@@ -226,15 +227,18 @@ class OpenAIResponsesRelayService {
             )
           }
 
-          let unauthorizedResponse = errorData
+          // 对401错误响应进行脱敏
+          let unauthorizedResponse
           if (
-            !unauthorizedResponse ||
-            typeof unauthorizedResponse !== 'object' ||
-            unauthorizedResponse.pipe ||
-            Buffer.isBuffer(unauthorizedResponse)
+            !errorData ||
+            typeof errorData !== 'object' ||
+            errorData.pipe ||
+            Buffer.isBuffer(errorData)
           ) {
             const fallbackMessage =
-              typeof errorData === 'string' && errorData.trim() ? errorData.trim() : 'Unauthorized'
+              typeof errorData === 'string' && errorData.trim()
+                ? sanitizeErrorMessage(errorData.trim())
+                : 'Unauthorized'
             unauthorizedResponse = {
               error: {
                 message: fallbackMessage,
@@ -242,7 +246,14 @@ class OpenAIResponsesRelayService {
                 code: 'unauthorized'
               }
             }
+          } else {
+            // 对对象类型的错误数据进行脱敏
+            unauthorizedResponse = sanitizeUpstreamError(errorData)
           }
+
+          logger.warn(
+            `🧹 [SANITIZED] OpenAI-Responses 401 unauthorized: ${JSON.stringify(unauthorizedResponse)}`
+          )
 
           // 清理监听器
           req.removeListener('close', handleClientDisconnect)
@@ -255,7 +266,21 @@ class OpenAIResponsesRelayService {
         req.removeListener('close', handleClientDisconnect)
         res.removeListener('close', handleClientDisconnect)
 
-        return res.status(response.status).json(errorData)
+        // 对错误数据进行脱敏
+        let sanitizedData
+        if (typeof errorData === 'string') {
+          sanitizedData = { error: { message: sanitizeErrorMessage(errorData) } }
+          logger.warn(
+            `🧹 [SANITIZED] OpenAI-Responses error (${response.status}): ${sanitizedData.error.message.substring(0, 100)}`
+          )
+        } else {
+          sanitizedData = sanitizeUpstreamError(errorData)
+          logger.warn(
+            `🧹 [SANITIZED] OpenAI-Responses error (${response.status}): ${JSON.stringify(sanitizedData)}`
+          )
+        }
+
+        return res.status(response.status).json(sanitizedData)
       }
 
       // 更新最后使用时间
@@ -362,15 +387,18 @@ class OpenAIResponsesRelayService {
             )
           }
 
-          let unauthorizedResponse = errorData
+          // 对401错误响应进行脱敏
+          let unauthorizedResponse
           if (
-            !unauthorizedResponse ||
-            typeof unauthorizedResponse !== 'object' ||
-            unauthorizedResponse.pipe ||
-            Buffer.isBuffer(unauthorizedResponse)
+            !errorData ||
+            typeof errorData !== 'object' ||
+            errorData.pipe ||
+            Buffer.isBuffer(errorData)
           ) {
             const fallbackMessage =
-              typeof errorData === 'string' && errorData.trim() ? errorData.trim() : 'Unauthorized'
+              typeof errorData === 'string' && errorData.trim()
+                ? sanitizeErrorMessage(errorData.trim())
+                : 'Unauthorized'
             unauthorizedResponse = {
               error: {
                 message: fallbackMessage,
@@ -378,12 +406,33 @@ class OpenAIResponsesRelayService {
                 code: 'unauthorized'
               }
             }
+          } else {
+            // 对对象类型的错误数据进行脱敏
+            unauthorizedResponse = sanitizeUpstreamError(errorData)
           }
+
+          logger.warn(
+            `🧹 [Catch] [SANITIZED] OpenAI-Responses 401 unauthorized: ${JSON.stringify(unauthorizedResponse)}`
+          )
 
           return res.status(401).json(unauthorizedResponse)
         }
 
-        return res.status(status).json(errorData)
+        // 对错误数据进行脱敏
+        let sanitizedData
+        if (typeof errorData === 'string') {
+          sanitizedData = { error: { message: sanitizeErrorMessage(errorData) } }
+          logger.warn(
+            `🧹 [Catch] [SANITIZED] OpenAI-Responses error (${status}): ${sanitizedData.error.message.substring(0, 100)}`
+          )
+        } else {
+          sanitizedData = sanitizeUpstreamError(errorData)
+          logger.warn(
+            `🧹 [Catch] [SANITIZED] OpenAI-Responses error (${status}): ${JSON.stringify(sanitizedData)}`
+          )
+        }
+
+        return res.status(status).json(sanitizedData)
       }
 
       // 其他错误

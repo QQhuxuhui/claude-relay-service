@@ -1019,10 +1019,16 @@ class ClaudeConsoleRelayService {
           }
 
           if (!responseStream.destroyed) {
+            // 对错误信息进行脱敏
+            const sanitizedMessage = sanitizeErrorMessage(error.message || 'Unknown error')
+            logger.warn(
+              `🧹 [Stream] [SANITIZED] Claude Console error: ${sanitizedMessage.substring(0, 100)}`
+            )
+
             responseStream.write('event: error\n')
             responseStream.write(
               `data: ${JSON.stringify({
-                error: error.message,
+                error: sanitizedMessage,
                 code: error.code,
                 timestamp: new Date().toISOString()
               })}\n\n`

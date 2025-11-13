@@ -3,6 +3,7 @@ const ProxyHelper = require('../utils/proxyHelper')
 const logger = require('../utils/logger')
 const config = require('../../config/config')
 const apiKeyService = require('./apiKeyService')
+const { sanitizeErrorMessage } = require('../utils/errorSanitizer')
 
 // Gemini API 配置
 const GEMINI_API_BASE = 'https://cloudcode.googleapis.com/v1'
@@ -342,23 +343,31 @@ async function sendGeminiRequest({
 
     logger.error('Gemini API request failed:', error.response?.data || error.message)
 
-    // 转换错误格式
+    // 转换错误格式并脱敏
     if (error.response) {
       const geminiError = error.response.data?.error
-      const err = new Error(geminiError?.message || 'Gemini API request failed')
+      const rawMessage = geminiError?.message || 'Gemini API request failed'
+
+      // 对错误信息进行脱敏
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      logger.warn(`🧹 [SANITIZED] Gemini error: ${sanitizedMessage.substring(0, 100)}`)
+
+      const err = new Error(sanitizedMessage)
       err.status = error.response.status
       err.error = {
-        message: geminiError?.message || 'Gemini API request failed',
+        message: sanitizedMessage,
         type: geminiError?.code || 'api_error',
         code: geminiError?.code
       }
       throw err
     }
 
-    const err = new Error(error.message)
+    // 对网络错误也进行脱敏
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Network error')
+    const err = new Error(sanitizedMessage)
     err.status = 500
     err.error = {
-      message: error.message,
+      message: sanitizedMessage,
       type: 'network_error'
     }
     throw err
@@ -529,28 +538,33 @@ async function countTokens({
     )
     logger.error('Error details:', error.response?.data || error.message)
 
-    // 转换错误格式
+    // 转换错误格式并脱敏
     if (error.response) {
       const geminiError = error.response.data?.error
-      const errorObj = new Error(
+      const rawMessage =
         geminiError?.message ||
-          `Gemini countTokens API request failed (Status: ${error.response.status})`
-      )
+        `Gemini countTokens API request failed (Status: ${error.response.status})`
+
+      // 对错误信息进行脱敏
+      const sanitizedMessage = sanitizeErrorMessage(rawMessage)
+      logger.warn(`🧹 [SANITIZED] Gemini countTokens error: ${sanitizedMessage.substring(0, 100)}`)
+
+      const errorObj = new Error(sanitizedMessage)
       errorObj.status = error.response.status
       errorObj.error = {
-        message:
-          geminiError?.message ||
-          `Gemini countTokens API request failed (Status: ${error.response.status})`,
+        message: sanitizedMessage,
         type: geminiError?.code || 'api_error',
         code: geminiError?.code
       }
       throw errorObj
     }
 
-    const errorObj = new Error(error.message)
+    // 对网络错误也进行脱敏
+    const sanitizedMessage = sanitizeErrorMessage(error.message || 'Network error')
+    const errorObj = new Error(sanitizedMessage)
     errorObj.status = 500
     errorObj.error = {
-      message: error.message,
+      message: sanitizedMessage,
       type: 'network_error'
     }
     throw errorObj
