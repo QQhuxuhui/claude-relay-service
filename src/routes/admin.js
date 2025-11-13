@@ -10,6 +10,7 @@ const openaiAccountService = require('../services/openaiAccountService')
 const openaiResponsesAccountService = require('../services/openaiResponsesAccountService')
 const azureOpenaiAccountService = require('../services/azureOpenaiAccountService')
 const accountGroupService = require('../services/accountGroupService')
+const rateMultiplierService = require('../services/rateMultiplierService')
 const redis = require('../models/redis')
 const { authenticateAdmin } = require('../middleware/auth')
 const logger = require('../utils/logger')
@@ -9774,6 +9775,160 @@ router.delete('/qr-codes/:type', authenticateAdmin, async (req, res) => {
     logger.error('Failed to delete QR code:', error)
     return res.status(500).json({
       error: 'Failed to delete QR code',
+      message: error.message
+    })
+  }
+})
+
+// ==========================================
+// 💰 费率倍率管理 API
+// ==========================================
+
+/**
+ * GET /admin/rate-multipliers
+ * 获取所有费率倍率配置
+ */
+router.get('/rate-multipliers', authenticateAdmin, async (req, res) => {
+  try {
+    const multipliers = await rateMultiplierService.getAllMultipliers()
+
+    return res.json({
+      success: true,
+      multipliers
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get rate multipliers:', error)
+    return res.status(500).json({
+      error: 'Failed to get rate multipliers',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * GET /admin/rate-multipliers/defaults
+ * 获取默认费率倍率配置
+ */
+router.get('/rate-multipliers/defaults', authenticateAdmin, async (req, res) => {
+  try {
+    const defaults = rateMultiplierService.getDefaults()
+    const platforms = rateMultiplierService.getSupportedPlatforms()
+
+    return res.json({
+      success: true,
+      defaults,
+      platforms
+    })
+  } catch (error) {
+    logger.error('❌ Failed to get default rate multipliers:', error)
+    return res.status(500).json({
+      error: 'Failed to get default rate multipliers',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * PUT /admin/rate-multipliers
+ * 批量更新费率倍率配置
+ */
+router.put('/rate-multipliers', authenticateAdmin, async (req, res) => {
+  try {
+    const multipliers = req.body
+
+    if (!multipliers || typeof multipliers !== 'object') {
+      return res.status(400).json({
+        error: 'Invalid request body',
+        message: 'Request body must be an object containing platform multipliers'
+      })
+    }
+
+    const result = await rateMultiplierService.updateMultipliers(multipliers)
+
+    if (result.errors && result.errors.length > 0) {
+      logger.warn('⚠️ Some multipliers failed to update:', result.errors)
+    }
+
+    const finalMultipliers = await rateMultiplierService.getAllMultipliers()
+
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    logger.info(`💰 Rate multipliers updated by ${adminId}:`, result.updated)
+
+    return res.json({
+      success: true,
+      updated: result.updated,
+      errors: result.errors,
+      multipliers: finalMultipliers
+    })
+  } catch (error) {
+    logger.error('❌ Failed to update rate multipliers:', error)
+    return res.status(500).json({
+      error: 'Failed to update rate multipliers',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * PUT /admin/rate-multipliers/:platform
+ * 更新单个平台的费率倍率
+ */
+router.put('/rate-multipliers/:platform', authenticateAdmin, async (req, res) => {
+  try {
+    const { platform } = req.params
+    const { multiplier } = req.body
+
+    if (multiplier === undefined || multiplier === null) {
+      return res.status(400).json({
+        error: 'Missing multiplier value',
+        message: 'Request body must contain a "multiplier" field'
+      })
+    }
+
+    await rateMultiplierService.updateMultiplier(platform, multiplier)
+
+    const finalMultipliers = await rateMultiplierService.getAllMultipliers()
+
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    logger.info(`💰 Rate multiplier updated by ${adminId}: ${platform} = ${multiplier}x`)
+
+    return res.json({
+      success: true,
+      platform,
+      multiplier,
+      multipliers: finalMultipliers
+    })
+  } catch (error) {
+    logger.error('❌ Failed to update rate multiplier:', error)
+    return res.status(500).json({
+      error: 'Failed to update rate multiplier',
+      message: error.message
+    })
+  }
+})
+
+/**
+ * POST /admin/rate-multipliers/reset
+ * 重置费率倍率为默认值
+ */
+router.post('/rate-multipliers/reset', authenticateAdmin, async (req, res) => {
+  try {
+    await rateMultiplierService.resetToDefaults()
+
+    const multipliers = await rateMultiplierService.getAllMultipliers()
+
+    const adminId = req.admin?.username || req.admin?.id || 'unknown'
+    logger.info(`💰 Rate multipliers reset to defaults by ${adminId}`)
+
+    return res.json({
+      success: true,
+      message: 'Rate multipliers reset to defaults',
+      multipliers
+    })
+  } catch (error) {
+    logger.error('❌ Failed to reset rate multipliers:', error)
+    return res.status(500).json({
+      error: 'Failed to reset rate multipliers',
       message: error.message
     })
   }

@@ -71,6 +71,7 @@ const tabs = computed(() => {
   }
 
   baseTabs.push(
+    { key: 'rateMultipliers', name: '费率配置', shortName: '费率', icon: 'fas fa-percentage' },
     { key: 'qrCodes', name: 'QR Codes', shortName: 'QR', icon: 'fas fa-qrcode' },
     { key: 'tutorial', name: '使用教程', shortName: '教程', icon: 'fas fa-graduation-cap' },
     { key: 'settings', name: '系统设置', shortName: '设置', icon: 'fas fa-cogs' }

@@ -56,6 +56,11 @@ class Application {
       logger.info('🔄 Initializing pricing service...')
       await pricingService.initialize()
 
+      // 💰 初始化费率倍率服务
+      logger.info('🔄 Initializing rate multiplier service...')
+      const rateMultiplierService = require('./services/rateMultiplierService')
+      await rateMultiplierService.initialize()
+
       // 📋 初始化模型服务
       logger.info('🔄 Initializing model service...')
       const modelService = require('./services/modelService')

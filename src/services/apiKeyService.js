@@ -3,6 +3,7 @@ const { v4: uuidv4 } = require('uuid')
 const config = require('../../config/config')
 const redis = require('../models/redis')
 const logger = require('../utils/logger')
+const rateMultiplierService = require('./rateMultiplierService')
 
 const ACCOUNT_TYPE_CONFIG = {
   claude: { prefix: 'claude:account:' },
@@ -882,6 +883,49 @@ class ApiKeyService {
     }
   }
 
+  /**
+   * 根据账户ID获取账户类型
+   * @param {string} accountId - 账户ID
+   * @returns {string} 账户类型（claude, gemini, openai等）
+   */
+  async getAccountType(accountId) {
+    if (!accountId) {
+      return 'unknown'
+    }
+
+    try {
+      const client = redis.getClientSafe()
+
+      // 账户类型与Redis key前缀的映射
+      const typeMap = {
+        claude_account: 'claude',
+        claude_console_account: 'claude-console',
+        gemini_account: 'gemini',
+        openai_account: 'openai',
+        openai_responses_account: 'openai-responses',
+        bedrock_account: 'bedrock',
+        azure_openai_account: 'azure-openai',
+        droid_account: 'droid',
+        ccr_account: 'ccr'
+      }
+
+      // 尝试每种账户类型
+      for (const [keyPrefix, accountType] of Object.entries(typeMap)) {
+        const exists = await client.exists(`${keyPrefix}:${accountId}`)
+        if (exists) {
+          return accountType
+        }
+      }
+
+      // 如果没找到，记录警告
+      logger.debug(`⚠️ Could not determine account type for accountId: ${accountId}`)
+      return 'unknown'
+    } catch (error) {
+      logger.error('❌ Failed to get account type:', error)
+      return 'unknown'
+    }
+  }
+
   // 📊 记录使用情况（支持缓存token和账户级别统计）
   async recordUsage(
     keyId,
@@ -928,11 +972,36 @@ class ApiKeyService {
         isLongContextRequest
       )
 
-      // 记录费用统计
-      if (costInfo.costs.total > 0) {
-        await redis.incrementDailyCost(keyId, costInfo.costs.total)
+      // 🆕 应用费率倍率
+      let finalCost = costInfo.costs.total
+      let rateMultiplier = 1.0
+      let accountType = 'unknown'
+
+      if (accountId && costInfo.costs.total > 0) {
+        try {
+          accountType = await this.getAccountType(accountId)
+          rateMultiplier = await rateMultiplierService.getMultiplier(accountType)
+          finalCost = costInfo.costs.total * rateMultiplier
+
+          logger.debug(
+            `💰 Applied rate multiplier: base=$${costInfo.costs.total.toFixed(6)}, ` +
+              `multiplier=${rateMultiplier}x (${accountType}), final=$${finalCost.toFixed(6)}`
+          )
+        } catch (error) {
+          logger.error('❌ Failed to apply rate multiplier, using base cost:', error)
+          // 出错时使用原始费用
+          finalCost = costInfo.costs.total
+          rateMultiplier = 1.0
+        }
+      }
+
+      // 记录费用统计（使用倍率后的费用）
+      if (finalCost > 0) {
+        await redis.incrementDailyCost(keyId, finalCost)
         logger.database(
-          `💰 Recorded cost for ${keyId}: $${costInfo.costs.total.toFixed(6)}, model: ${model}`
+          `💰 Recorded cost for ${keyId}: $${finalCost.toFixed(6)} ` +
+            `(base: $${costInfo.costs.total.toFixed(6)}, multiplier: ${rateMultiplier}x, ` +
+            `account type: ${accountType}, model: ${model})`
         )
       } else {
         logger.debug(`💰 No cost recorded for ${keyId} - zero cost for model: ${model}`)
@@ -967,8 +1036,8 @@ class ApiKeyService {
         }
       }
 
-      // 记录单次请求的使用详情
-      const usageCost = costInfo && costInfo.costs ? costInfo.costs.total || 0 : 0
+      // 记录单次请求的使用详情（使用倍率后的费用）
+      const usageCost = finalCost
       await redis.addUsageRecord(keyId, {
         timestamp: new Date().toISOString(),
         model,
@@ -979,7 +1048,11 @@ class ApiKeyService {
         cacheReadTokens,
         totalTokens,
         cost: Number(usageCost.toFixed(6)),
-        costBreakdown: costInfo && costInfo.costs ? costInfo.costs : undefined
+        costBreakdown: costInfo && costInfo.costs ? costInfo.costs : undefined,
+        // 🆕 添加倍率信息
+        rateMultiplier,
+        accountType,
+        baseCost: costInfo && costInfo.costs ? Number(costInfo.costs.total.toFixed(6)) : 0
       })
 
       const logParts = [`Model: ${model}`, `Input: ${inputTokens}`, `Output: ${outputTokens}`]

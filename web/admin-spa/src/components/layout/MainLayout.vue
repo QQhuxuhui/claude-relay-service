@@ -40,6 +40,7 @@ const tabRouteMap = computed(() => {
     apiKeys: '/api-keys',
     accounts: '/accounts',
     riskMonitor: '/risk-monitor',
+    rateMultipliers: '/rate-multipliers',
     qrCodes: '/qr-codes',
     tutorial: '/tutorial',
     settings: '/settings'
@@ -70,6 +71,7 @@ const initActiveTab = () => {
       ApiKeys: 'apiKeys',
       Accounts: 'accounts',
       RiskMonitor: 'riskMonitor',
+      RateMultipliers: 'rateMultipliers',
       QrCodes: 'qrCodes',
       Tutorial: 'tutorial',
       Settings: 'settings'
