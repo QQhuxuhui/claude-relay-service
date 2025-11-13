@@ -1007,7 +1007,7 @@ class ClaudeRelayService {
           ...finalHeaders
         },
         agent: proxyAgent,
-        timeout: timeoutManager.getAccountTimeout(account)
+        timeout: timeoutManager.getSmartTimeout(account, body)
       }
 
       // 使用统一 User-Agent 或客户端提供的，最后使用默认值
@@ -1323,7 +1323,7 @@ class ClaudeRelayService {
           ...finalHeaders
         },
         agent: proxyAgent,
-        timeout: timeoutManager.getAccountTimeout(account)
+        timeout: timeoutManager.getSmartTimeout(account, body)
       }
 
       // 使用统一 User-Agent 或客户端提供的，最后使用默认值

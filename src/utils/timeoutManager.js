@@ -62,6 +62,79 @@ class TimeoutManager {
   }
 
   /**
+   * 获取智能超时时间（根据请求大小动态调整）
+   * 策略：根据请求体大小分档设置超时时间，平衡响应速度和并发槽位占用
+   *
+   * @param {Object} account 账户对象
+   * @param {Object|string} requestBody 请求体（对象或JSON字符串）
+   * @returns {number} 超时时间（毫秒）
+   */
+  getSmartTimeout(account, requestBody) {
+    // 计算请求体大小（字节）
+    let bodySize = 0
+    try {
+      if (typeof requestBody === 'string') {
+        bodySize = Buffer.byteLength(requestBody, 'utf8')
+      } else if (requestBody) {
+        bodySize = Buffer.byteLength(JSON.stringify(requestBody), 'utf8')
+      }
+    } catch (error) {
+      logger.warn('Failed to calculate request body size, using default timeout', {
+        error: error.message
+      })
+      return this.getAccountTimeout(account)
+    }
+
+    // 获取基础超时时间（秒）
+    const provider = account?.provider || 'default'
+    const baseTimeoutSeconds = this.timeoutConfig[provider] || this.timeoutConfig.default
+
+    // 智能超时策略：根据请求大小分档
+    let timeoutSeconds
+    if (bodySize < 10000) {
+      // <10KB: 小请求，使用较短超时（最多60秒）
+      timeoutSeconds = Math.min(baseTimeoutSeconds, 60)
+      logger.debug(
+        `Smart timeout (small): ${timeoutSeconds}s for ${(bodySize / 1024).toFixed(2)}KB`
+      )
+    } else if (bodySize < 50000) {
+      // 10-50KB: 中型请求，使用中等超时（最多90秒）
+      timeoutSeconds = Math.min(baseTimeoutSeconds, 90)
+      logger.debug(
+        `Smart timeout (medium): ${timeoutSeconds}s for ${(bodySize / 1024).toFixed(2)}KB`
+      )
+    } else if (bodySize < 150000) {
+      // 50-150KB: 较大请求，使用较长超时（最多180秒）
+      timeoutSeconds = Math.min(baseTimeoutSeconds, 180)
+      logger.debug(
+        `Smart timeout (large): ${timeoutSeconds}s for ${(bodySize / 1024).toFixed(2)}KB`
+      )
+    } else {
+      // >150KB: 超大请求，使用完整超时
+      timeoutSeconds = baseTimeoutSeconds
+      logger.debug(
+        `Smart timeout (xlarge): ${timeoutSeconds}s for ${(bodySize / 1024).toFixed(2)}KB`
+      )
+    }
+
+    // 账户自定义超时优先级最高
+    if (account?.timeout && account.timeout > 0) {
+      const customTimeoutSeconds = account.timeout / 1000
+      logger.debug(
+        `Using custom timeout override: ${customTimeoutSeconds}s (ignoring smart timeout: ${timeoutSeconds}s)`
+      )
+      return account.timeout
+    }
+
+    const timeoutMs = timeoutSeconds * 1000
+    logger.info(
+      `⏱️ Smart timeout: ${timeoutSeconds}s for ${(bodySize / 1024).toFixed(2)}KB, provider: ${provider}`
+    )
+
+    return timeoutMs
+  }
+
+  /**
    * 获取所有提供商的超时配置
    * @returns {Object} 超时配置
    */

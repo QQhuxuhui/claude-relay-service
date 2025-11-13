@@ -1,7 +1,6 @@
 const axios = require('axios')
 const ccrAccountService = require('./ccrAccountService')
 const logger = require('../utils/logger')
-const config = require('../../config/config')
 const { parseVendorPrefixedModel } = require('../utils/modelHelper')
 const timeoutManager = require('../utils/timeoutManager')
 
@@ -122,7 +121,7 @@ class CcrRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, requestBody),
         signal: abortController.signal,
         validateStatus: () => true // 接受所有状态码
       }
@@ -351,7 +350,7 @@ class CcrRelayService {
           'User-Agent': userAgent,
           ...filteredHeaders
         },
-        timeout: timeoutManager.getAccountTimeout(account),
+        timeout: timeoutManager.getSmartTimeout(account, body),
         responseType: 'stream',
         validateStatus: () => true // 接受所有状态码
       }
