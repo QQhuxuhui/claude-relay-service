@@ -7817,25 +7817,36 @@ router.put('/openai-accounts/:id', authenticateAdmin, async (req, res) => {
       }
     }
 
-    // 处理分组的变更
-    if (mappedUpdates.accountType !== undefined) {
-      // 如果之前是分组类型，需要从所有分组中移除
-      if (currentAccount.accountType === 'group') {
+    const accountTypeChanged =
+      mappedUpdates.accountType !== undefined &&
+      mappedUpdates.accountType !== currentAccount.accountType
+    const targetAccountType =
+      mappedUpdates.accountType !== undefined
+        ? mappedUpdates.accountType
+        : currentAccount.accountType
+    const hasGroupIdsField = Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')
+    const hasGroupIdField = Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupId')
+
+    // 如果账户类型从分组切换为其他类型，确保彻底移除分组关系
+    if (accountTypeChanged && currentAccount.accountType === 'group' && targetAccountType !== 'group') {
+      await accountGroupService.removeAccountFromAllGroups(id)
+      mappedUpdates.groupId = null
+    }
+
+    const shouldHandleGroups =
+      targetAccountType === 'group' && (accountTypeChanged || hasGroupIdsField || hasGroupIdField)
+
+    if (shouldHandleGroups) {
+      // 在处理新的分组配置前，确保不会残留旧关系
+      if (hasGroupIdsField) {
+        if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
+          await accountGroupService.setAccountGroups(id, mappedUpdates.groupIds, 'openai')
+        } else {
+          await accountGroupService.removeAccountFromAllGroups(id)
+        }
+      } else if (hasGroupIdField) {
         await accountGroupService.removeAccountFromAllGroups(id)
-      }
-      // 如果新类型是分组，处理多分组支持
-      if (mappedUpdates.accountType === 'group') {
-        if (Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')) {
-          // 如果明确提供了 groupIds 参数（包括空数组）
-          if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
-            // 设置新的多分组
-            await accountGroupService.setAccountGroups(id, mappedUpdates.groupIds, 'openai')
-          } else {
-            // groupIds 为空数组，从所有分组中移除
-            await accountGroupService.removeAccountFromAllGroups(id)
-          }
-        } else if (mappedUpdates.groupId) {
-          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+        if (mappedUpdates.groupId) {
           await accountGroupService.addAccountToGroup(id, mappedUpdates.groupId, 'openai')
         }
       }
@@ -7917,12 +7928,9 @@ router.delete('/openai-accounts/:id', authenticateAdmin, async (req, res) => {
     // 自动解绑所有绑定的 API Keys
     const unboundCount = await apiKeyService.unbindAccountFromAllKeys(id, 'openai')
 
-    // 如果账户在分组中，从分组中移除
+    // 如果账户在分组中，从所有分组中移除以避免残留引用
     if (account.accountType === 'group') {
-      const group = await accountGroupService.getAccountGroup(id)
-      if (group) {
-        await accountGroupService.removeAccountFromGroup(id, group.id)
-      }
+      await accountGroupService.removeAccountFromAllGroups(id)
     }
 
     await openaiAccountService.deleteAccount(id)
