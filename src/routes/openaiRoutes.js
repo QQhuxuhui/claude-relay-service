@@ -634,8 +634,9 @@ const handleResponses = async (req, res) => {
         const responseData = upstream.data
 
         // 从响应中获取实际的 model 和 usage
-        actualModel = responseData.model || requestedModel || 'gpt-4'
-        usageData = responseData.usage
+        // 支持两种格式：标准格式 {usage} 和 Codex 格式 {response: {usage}}
+        actualModel = responseData.model || responseData.response?.model || requestedModel || 'gpt-4'
+        usageData = responseData.usage || responseData.response?.usage
 
         logger.debug(`📊 Non-stream response - Model: ${actualModel}, Usage:`, usageData)
 

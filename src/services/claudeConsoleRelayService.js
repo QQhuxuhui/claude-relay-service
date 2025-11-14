@@ -9,6 +9,7 @@ const {
   isAccountDisabledError
 } = require('../utils/errorSanitizer')
 const timeoutManager = require('../utils/timeoutManager')
+const { classifyAbortReason } = require('../utils/requestAbortClassifier')
 
 class ClaudeConsoleRelayService {
   constructor() {
@@ -323,26 +324,29 @@ class ClaudeConsoleRelayService {
         error.code === 'ECONNABORTED' ||
         error.code === 'ERR_CANCELED'
       ) {
-        // 检查是否是客户端主动断开还是超时
-        const wasClientDisconnect = abortController && abortController.signal.aborted
         const bodySize = requestBody ? Buffer.byteLength(JSON.stringify(requestBody), 'utf8') : 0
+        const classification = classifyAbortReason({
+          clientDisconnected: abortController && abortController.signal.aborted,
+          error
+        })
 
-        if (wasClientDisconnect) {
-          logger.info(
-            `🔌 Request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
-          )
-          throw new Error('Client disconnected')
-        } else if (error.code === 'ECONNABORTED' && error.message?.includes('timeout')) {
+        if (classification.reason === 'timeout') {
           logger.warn(`⏱️ Upstream request timeout for Claude Console account ${accountId}`, {
             timeout: timeoutManager.getSmartTimeout(account, requestBody),
             bodySize: `${(bodySize / 1024).toFixed(2)}KB`,
             errorMessage: error.message
           })
           throw new Error('Upstream timeout')
-        } else {
-          logger.info('Request aborted due to client disconnect (fallback detection)')
-          throw new Error('Client disconnected')
         }
+
+        if (classification.fallback) {
+          logger.info('Request aborted due to client disconnect (fallback detection)')
+        } else {
+          logger.info(
+            `🔌 Request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
+          )
+        }
+        throw new Error('Client disconnected')
       }
 
       logger.error(
@@ -953,14 +957,13 @@ class ClaudeConsoleRelayService {
             error.code === 'ECONNABORTED' ||
             error.code === 'ERR_CANCELED'
           ) {
-            const wasClientDisconnect = aborted // 使用 aborted 标志判断客户端断开
             const bodySize = body ? Buffer.byteLength(JSON.stringify(body), 'utf8') : 0
+            const classification = classifyAbortReason({
+              clientDisconnected: aborted,
+              error
+            })
 
-            if (wasClientDisconnect) {
-              logger.info(
-                `🔌 Stream request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
-              )
-            } else if (error.code === 'ECONNABORTED' && error.message?.includes('timeout')) {
+            if (classification.reason === 'timeout') {
               logger.warn(
                 `⏱️ Upstream stream request timeout for Claude Console account ${accountId}`,
                 {
@@ -969,15 +972,19 @@ class ClaudeConsoleRelayService {
                   errorMessage: error.message
                 }
               )
-            } else {
+            } else if (classification.fallback) {
               logger.info('Stream request aborted (fallback detection)')
+            } else {
+              logger.info(
+                `🔌 Stream request aborted due to client disconnect (${(bodySize / 1024).toFixed(2)}KB)`
+              )
             }
 
             if (!responseStream.destroyed) {
               responseStream.write('event: error\n')
               responseStream.write(
                 `data: ${JSON.stringify({
-                  error: wasClientDisconnect ? 'Client disconnected' : 'Request timeout',
+                  error: classification.reason === 'client' ? 'Client disconnected' : 'Request timeout',
                   code: error.code,
                   timestamp: new Date().toISOString()
                 })}\n\n`
