@@ -148,7 +148,12 @@
             class="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800"
           >
             <div class="mb-3 flex items-center">
-              <div :class="['mr-3 flex h-10 w-10 items-center justify-center rounded-lg', platform.color]">
+              <div
+                :class="[
+                  'mr-3 flex h-10 w-10 items-center justify-center rounded-lg',
+                  platform.color
+                ]"
+              >
                 <i :class="[platform.icon, 'text-white']"></i>
               </div>
               <div class="flex-1">
@@ -213,23 +218,27 @@
         <div class="mt-6 flex flex-col gap-3 sm:flex-row sm:justify-between">
           <div class="flex flex-col gap-2 sm:flex-row sm:gap-3">
             <button
-              :disabled="!hasChanges || !allValid || saving"
               class="btn btn-primary flex-1 sm:flex-none"
+              :disabled="!hasChanges || !allValid || saving"
               @click="saveMultipliers"
             >
               <i v-if="!saving" class="fas fa-save mr-2"></i>
               <div v-else class="loading-spinner-small mr-2"></div>
               {{ saving ? '保存中...' : '保存配置' }}
             </button>
-            <button :disabled="saving" class="btn btn-secondary flex-1 sm:flex-none" @click="resetToDefaults">
+            <button
+              class="btn btn-secondary flex-1 sm:flex-none"
+              :disabled="saving"
+              @click="resetToDefaults"
+            >
               <i class="fas fa-undo mr-2"></i>
               重置默认
             </button>
           </div>
           <button
             v-if="hasChanges"
-            :disabled="saving"
             class="btn btn-ghost flex-1 sm:flex-none"
+            :disabled="saving"
             @click="cancelChanges"
           >
             <i class="fas fa-times mr-2"></i>
@@ -274,10 +283,8 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useToast } from '@/composables/useToast'
+import { showToast } from '@/utils/toast'
 import { apiClient } from '@/config/api'
-
-const { showToast } = useToast()
 
 // 状态
 const loading = ref(true)

@@ -7523,6 +7523,7 @@ router.post('/openai-accounts', authenticateAdmin, async (req, res) => {
       proxy,
       accountType,
       groupId,
+      groupIds,
       rateLimitDuration,
       priority,
       needsImmediateRefresh, // 是否需要立即刷新
@@ -7533,6 +7534,22 @@ router.post('/openai-accounts', authenticateAdmin, async (req, res) => {
       return res.status(400).json({
         success: false,
         message: '账户名称不能为空'
+      })
+    }
+
+    // 验证accountType的有效性
+    if (accountType && !['shared', 'dedicated', 'group'].includes(accountType)) {
+      return res.status(400).json({
+        success: false,
+        message: '账户类型必须是 shared、dedicated 或 group'
+      })
+    }
+
+    // 如果是分组类型，验证groupId或groupIds
+    if (accountType === 'group' && !groupId && (!groupIds || groupIds.length === 0)) {
+      return res.status(400).json({
+        success: false,
+        message: '分组调度账户必须至少选择一个分组'
       })
     }
 
@@ -7574,8 +7591,14 @@ router.post('/openai-accounts', authenticateAdmin, async (req, res) => {
         }
 
         // 如果是分组类型，添加到分组
-        if (accountType === 'group' && groupId) {
-          await accountGroupService.addAccountToGroup(tempAccount.id, groupId, 'openai')
+        if (accountType === 'group') {
+          if (groupIds && groupIds.length > 0) {
+            // 使用多分组设置
+            await accountGroupService.setAccountGroups(tempAccount.id, groupIds, 'openai')
+          } else if (groupId) {
+            // 兼容单分组模式
+            await accountGroupService.addAccountToGroup(tempAccount.id, groupId, 'openai')
+          }
         }
 
         // 清除敏感信息后返回
@@ -7632,8 +7655,14 @@ router.post('/openai-accounts', authenticateAdmin, async (req, res) => {
     const createdAccount = await openaiAccountService.createAccount(accountData)
 
     // 如果是分组类型，添加到分组
-    if (accountType === 'group' && groupId) {
-      await accountGroupService.addAccountToGroup(createdAccount.id, groupId, 'openai')
+    if (accountType === 'group') {
+      if (groupIds && groupIds.length > 0) {
+        // 使用多分组设置
+        await accountGroupService.setAccountGroups(createdAccount.id, groupIds, 'openai')
+      } else if (groupId) {
+        // 兼容单分组模式
+        await accountGroupService.addAccountToGroup(createdAccount.id, groupId, 'openai')
+      }
     }
 
     // 如果需要刷新但不强制成功（OAuth 模式可能已有完整信息）
@@ -7684,9 +7713,15 @@ router.put('/openai-accounts/:id', authenticateAdmin, async (req, res) => {
         .json({ error: 'Invalid account type. Must be "shared", "dedicated" or "group"' })
     }
 
-    // 如果更新为分组类型，验证groupId
-    if (mappedUpdates.accountType === 'group' && !mappedUpdates.groupId) {
-      return res.status(400).json({ error: 'Group ID is required for group type accounts' })
+    // 如果更新为分组类型，验证groupId或groupIds
+    if (
+      mappedUpdates.accountType === 'group' &&
+      !mappedUpdates.groupId &&
+      (!mappedUpdates.groupIds || mappedUpdates.groupIds.length === 0)
+    ) {
+      return res.status(400).json({
+        error: 'Group ID or Group IDs are required for group type accounts'
+      })
     }
 
     // 获取账户当前信息以处理分组变更
@@ -7783,37 +7818,26 @@ router.put('/openai-accounts/:id', authenticateAdmin, async (req, res) => {
     }
 
     // 处理分组的变更
-    const newAccountType =
-      mappedUpdates.accountType !== undefined
-        ? mappedUpdates.accountType
-        : currentAccount.accountType
-    const newGroupId =
-      mappedUpdates.groupId !== undefined ? mappedUpdates.groupId : currentAccount.groupId
-    const accountTypeChanged =
-      mappedUpdates.accountType !== undefined &&
-      mappedUpdates.accountType !== currentAccount.accountType
-    const groupIdChanged =
-      mappedUpdates.groupId !== undefined && mappedUpdates.groupId !== currentAccount.groupId
-
-    // 如果账户类型改变或者分组ID改变，需要更新分组关系
-    if (accountTypeChanged || groupIdChanged) {
-      // 如果之前是分组类型，需要从原分组中移除
+    if (mappedUpdates.accountType !== undefined) {
+      // 如果之前是分组类型，需要从所有分组中移除
       if (currentAccount.accountType === 'group') {
-        const oldGroup = await accountGroupService.getAccountGroup(id)
-        if (oldGroup) {
-          await accountGroupService.removeAccountFromGroup(id, oldGroup.id)
-          logger.info(`🔄 从分组 ${oldGroup.name} 中移除账户 ${id}`)
+        await accountGroupService.removeAccountFromAllGroups(id)
+      }
+      // 如果新类型是分组，处理多分组支持
+      if (mappedUpdates.accountType === 'group') {
+        if (Object.prototype.hasOwnProperty.call(mappedUpdates, 'groupIds')) {
+          // 如果明确提供了 groupIds 参数（包括空数组）
+          if (mappedUpdates.groupIds && mappedUpdates.groupIds.length > 0) {
+            // 设置新的多分组
+            await accountGroupService.setAccountGroups(id, mappedUpdates.groupIds, 'openai')
+          } else {
+            // groupIds 为空数组，从所有分组中移除
+            await accountGroupService.removeAccountFromAllGroups(id)
+          }
+        } else if (mappedUpdates.groupId) {
+          // 向后兼容：仅当没有 groupIds 但有 groupId 时使用单分组逻辑
+          await accountGroupService.addAccountToGroup(id, mappedUpdates.groupId, 'openai')
         }
-      }
-      // 如果新类型是分组，添加到新分组
-      if (newAccountType === 'group' && newGroupId) {
-        await accountGroupService.addAccountToGroup(id, newGroupId, 'openai')
-        logger.info(`✅ 将账户 ${id} 添加到分组 ${newGroupId}`)
-      }
-      // 如果从分组类型改为其他类型，清空 groupId 以保持数据一致性
-      if (currentAccount.accountType === 'group' && newAccountType !== 'group') {
-        mappedUpdates.groupId = null
-        logger.info(`🧹 清空账户 ${id} 的 groupId (类型从 group 改为 ${newAccountType})`)
       }
     }
 

@@ -65,13 +65,17 @@ Docker 镜像构建脚本
     --dry-run               模拟运行，不实际构建
     --list-tags             列出最近的镜像标签
     --use-app-version       使用项目 VERSION 文件中的版本号
+    --skip-build-web        跳过前端编译步骤（默认会自动编译前端）
 
 示例:
-    # 自动递增版本并构建
+    # 自动递增版本并构建（会自动编译前端）
     $0
 
     # 构建并推送到远程仓库
     $0 --push
+
+    # 跳过前端编译（如果已手动编译）
+    $0 --skip-build-web
 
     # 指定版本号
     $0 -v 10
@@ -130,6 +134,66 @@ check_docker() {
         print_error "Docker 未运行，请先启动 Docker"
         exit 1
     fi
+}
+
+# 编译前端项目
+build_frontend() {
+    local dry_run=$1
+
+    print_info "开始编译前端项目..."
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "  项目路径: web/admin-spa"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    if [ "$dry_run" = true ]; then
+        print_warning "模拟运行模式，不会实际编译"
+        print_info "将执行的命令："
+        echo "cd web/admin-spa && npm run build"
+        return 0
+    fi
+
+    # 检查前端目录是否存在
+    if [ ! -d "web/admin-spa" ]; then
+        print_error "前端项目目录不存在: web/admin-spa"
+        exit 1
+    fi
+
+    # 检查 package.json 是否存在
+    if [ ! -f "web/admin-spa/package.json" ]; then
+        print_error "前端项目配置文件不存在: web/admin-spa/package.json"
+        exit 1
+    fi
+
+    # 检查是否已安装依赖
+    if [ ! -d "web/admin-spa/node_modules" ]; then
+        print_warning "前端依赖未安装，正在安装..."
+        cd web/admin-spa && npm install
+        cd ../..
+    fi
+
+    # 执行前端编译
+    print_info "正在编译前端项目..."
+    if cd web/admin-spa && npm run build; then
+        cd ../..
+        print_success "前端编译完成"
+        echo ""
+
+        # 检查 dist 目录是否生成
+        if [ -d "web/admin-spa/dist" ]; then
+            local dist_size=$(du -sh web/admin-spa/dist | cut -f1)
+            print_info "编译产物大小: $dist_size"
+        else
+            print_error "前端编译失败：dist 目录未生成"
+            exit 1
+        fi
+    else
+        cd ../..
+        print_error "前端编译失败"
+        exit 1
+    fi
+
+    echo ""
 }
 
 # 检查是否登录到阿里云镜像仓库
@@ -286,6 +350,7 @@ main() {
     local platform=""
     local dry_run=false
     local use_app_version=false
+    local skip_build_web=false
 
     # 解析命令行参数
     while [[ $# -gt 0 ]]; do
@@ -318,6 +383,10 @@ main() {
                 ;;
             --use-app-version)
                 use_app_version=true
+                shift
+                ;;
+            --skip-build-web)
+                skip_build_web=true
                 shift
                 ;;
             *)
@@ -372,6 +441,14 @@ main() {
     fi
 
     echo ""
+
+    # 编译前端项目（除非跳过）
+    if [ "$skip_build_web" = false ]; then
+        build_frontend "$dry_run"
+    else
+        print_warning "跳过前端编译步骤"
+        echo ""
+    fi
 
     # 构建镜像
     build_image "$version" "$no_cache" "$platform" "$dry_run"
